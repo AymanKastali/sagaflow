@@ -94,8 +94,9 @@ func Shared(t *testing.T) *PG {
 	return shared
 }
 
-// DSN creates dbName on first request and returns a DSN pointing at it. Name the
-// database after the test so tests in one package cannot collide.
+// DSN creates dbName for the calling test and returns a DSN pointing at it. Name
+// the database after the test so tests in one package cannot collide. Calling it
+// more than once within one test returns the same database.
 func (p *PG) DSN(t *testing.T, dbName string) string {
 	t.Helper()
 	p.mu.Lock()
@@ -111,11 +112,27 @@ func (p *PG) DSN(t *testing.T, dbName string) string {
 		// CREATE DATABASE takes no parameters, so the name has to be
 		// interpolated. pgx.Identifier does the quoting and escaping; fmt's %q
 		// only looks right because Go and SQL happen to share the double quote.
-		stmt := "CREATE DATABASE " + pgx.Identifier{dbName}.Sanitize()
-		if _, err := conn.Exec(ctx, stmt); err != nil {
+		name := pgx.Identifier{dbName}.Sanitize()
+		// Drop first. Database names come from test names, so `go test -count=2`
+		// asks for the same name twice in one process; without this the second run
+		// inherits the first run's rows and fails on counts and version conflicts
+		// that have nothing to do with the code under test. FORCE so a leaked
+		// connection cannot wedge the whole suite.
+		if _, err := conn.Exec(ctx, "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)"); err != nil {
+			t.Fatalf("drop stale database %s: %v", dbName, err)
+		}
+		if _, err := conn.Exec(ctx, "CREATE DATABASE "+name); err != nil {
 			t.Fatalf("create database %s: %v", dbName, err)
 		}
 		p.created[dbName] = true
+		// Forget the name when this test ends, so a repeat run recreates it rather
+		// than reusing it. Cleanups run last-in-first-out, so the test's own pool
+		// has already been closed by the time this runs.
+		t.Cleanup(func() {
+			p.mu.Lock()
+			delete(p.created, dbName)
+			p.mu.Unlock()
+		})
 	}
 	dsn, err := replaceDBName(p.baseDSN, dbName)
 	if err != nil {
