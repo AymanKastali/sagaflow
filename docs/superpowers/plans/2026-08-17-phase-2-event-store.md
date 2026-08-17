@@ -18,7 +18,7 @@
 
 Copied verbatim from spec §5 and §3. Every task's requirements implicitly include this section.
 
-- **Go 1.26.6.** The environment currently has 1.26.5 — Task 1 upgrades it. `go.mod` declares `go 1.26.6`.
+- **Go 1.26.6.** `go.mod` declares `go 1.26.6`; with `GOTOOLCHAIN=auto` the go command fetches that toolchain itself, so the installed go may be older and no machine-level upgrade is required.
 - **Module path:** `github.com/kptac/sagaflow`. One module at the repository root.
 - **Pinned images, never `latest`:** `apache/kafka:4.3.1`, `postgres:18.6`, `apicurio/apicurio-registry:3.3.1`, `cr.jaegertracing.io/jaegertracing/jaeger:2.20.0`.
 - **Pinned Go dependencies** (spec §5): franz-go v1.21.6, `franz-go/pkg/sr` v1.8.0, `franz-go/pkg/kadm` v1.18.0, pgx/v5 v5.10.0, tern/v2 v2.4.2, google/uuid v1.6.0, protobuf v1.36.12, otel + otel/sdk v1.45.0, testcontainers-go v0.44.0. **Add no dependency not listed in §5.**

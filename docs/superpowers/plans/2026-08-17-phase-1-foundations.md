@@ -18,7 +18,7 @@
 
 Copied verbatim from spec §5 and §3. Every task's requirements implicitly include this section.
 
-- **Go 1.26.6.** The environment currently has 1.26.5 — Task 1 upgrades it. `go.mod` declares `go 1.26.6`.
+- **Go 1.26.6.** `go.mod` declares `go 1.26.6`; with `GOTOOLCHAIN=auto` the go command fetches that toolchain itself, so the installed go may be older and no machine-level upgrade is required.
 - **Module path:** `github.com/kptac/sagaflow`. One module at the repository root.
 - **Pinned images, never `latest`:** `apache/kafka:4.3.1`, `postgres:18.6`, `apicurio/apicurio-registry:3.3.1`, `cr.jaegertracing.io/jaegertracing/jaeger:2.20.0`.
 - **Pinned Go dependencies** (spec §5): franz-go v1.21.6, `franz-go/pkg/sr` v1.8.0, `franz-go/pkg/kadm` v1.18.0, pgx/v5 v5.10.0, tern/v2 v2.4.2, google/uuid v1.6.0, protobuf v1.36.12, otel + otel/sdk v1.45.0, testcontainers-go v0.44.0. **Add no dependency not listed in §5.**
@@ -71,13 +71,15 @@ Both expose the same two-function shape — `Start()` for `TestMain` and `Shared
 - Consumes: nothing.
 - Produces: a module at `github.com/kptac/sagaflow` on Go 1.26.6; `make test` runs unit tests; `go tool buf` and `go tool protoc-gen-go` resolve at pinned versions.
 
-- [ ] **Step 1: Upgrade Go to 1.26.6 and confirm**
+- [ ] **Step 1: Confirm the toolchain can reach 1.26.6 — do not install anything**
 
 ```bash
-go version   # if this prints go1.26.5, install 1.26.6 first
+go env GOTOOLCHAIN   # expect: auto
 ```
 
-Install via your platform's usual route, then re-run. Expected: `go version go1.26.6 <os>/<arch>`. Do not continue on 1.26.5 — `go.mod` declares 1.26.6 and the build will refuse.
+With `GOTOOLCHAIN=auto` (the default since Go 1.21), the `go 1.26.6` directive this task writes into `go.mod` is self-fulfilling: the go command downloads the `go1.26.6` toolchain into the module cache and re-execs into it. The installed go can be older — here it is `go1.26.5` — and every build, test and `go tool` invocation still runs under 1.26.6. Nothing outside the repository changes, which is the point: a plan should not require a developer to re-provision their machine to build the project.
+
+If `GOTOOLCHAIN` is anything other than `auto` or `local+auto`, either unset it for this repository or install 1.26.6 through your usual route; do not lower the `go` directive to match an older toolchain, because that silently changes the language version the whole module compiles against.
 
 - [ ] **Step 2: Initialise the module and pin every dependency**
 
