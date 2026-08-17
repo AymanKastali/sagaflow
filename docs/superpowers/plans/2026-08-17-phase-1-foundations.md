@@ -782,7 +782,12 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestContainerRunsKafka431AndRoundTrips(t *testing.T) {
+// The broker being 4.3.1 is guaranteed by the pinned Image constant at container
+// creation (spec D16), not asserted here — a runtime version check would either
+// be tautological or rest on inferring a release from its supported API
+// versions. What this test proves is that the gated boot produced a broker the
+// host can actually reach and round-trip against.
+func TestSharedBrokerRoundTrips(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	brokers := kafkatest.Shared(t).Brokers()
