@@ -113,7 +113,9 @@ go tool buf --version          # expect 1.72.0
 go tool protoc-gen-go --version # expect v1.36.12
 ```
 
-If the `go` directive reads `go 1.26.5`, edit it to `go 1.26.6`.
+If the `go` directive reads anything other than `go 1.26.6`, fix it with `go mod edit -go=1.26.6`. Do this *before* the `go get` calls in Step 2, so they too run under the pinned toolchain.
+
+**Do not run `go mod tidy` until Phase 4b is complete.** Nothing imports the eleven libraries yet, so `go get` records them all as `// indirect` and `tidy` would delete every one of them — undoing this task. The versions are still reproducible in the meantime: they are recorded in `go.mod` and hashed in `go.sum`, so module resolution selects them regardless of the `indirect` marker, and each becomes a direct requirement as the phase that needs it lands. The two `tool` entries are unaffected — the `tool` directive is itself the thing that keeps them.
 
 - [ ] **Step 4: Write `.gitignore`**
 
