@@ -23,6 +23,13 @@ import (
 
 const Image = "apache/kafka:4.3.1"
 
+// startGate is the file the container blocks on before booting Kafka. See
+// runGatedBroker for why the boot has to be gated at all.
+const startGate = "/tmp/sagaflow-advertised-listeners"
+
+// gateOpened is the log line the container prints once it is waiting on the gate.
+const gateOpened = "sagaflow: awaiting advertised listeners"
+
 type Kafka struct {
 	brokers []string
 }
@@ -43,26 +50,8 @@ func Shared(t *testing.T) *Kafka {
 	return shared
 }
 
-// startGate is the file the container waits for before booting Kafka.
-const startGate = "/tmp/sagaflow-advertised-listeners"
-
 // Start brings up a single-node KRaft broker for the package and returns a stop
 // function. Call it from TestMain, exactly as with pgtest.Start.
-//
-// The advertised listener has to name the *host-mapped* port, and that port does
-// not exist until the container is running. advertised.listeners also cannot be
-// changed after the broker boots: in Kafka 4.3.1,
-// DynamicBrokerConfig.DynamicListenerConfig.RECONFIGURABLE_CONFIGS covers
-// listeners and listener.security.protocol.map but not advertised.listeners, and
-// ALL_DYNAMIC_CONFIGS is built from those same sets — so kafka-configs.sh rejects
-// it as a non-dynamic config.
-//
-// So the boot is gated instead: the container starts with its command wrapped in
-// a shell that blocks on startGate, we read the mapped port, write the real
-// advertised listener into that file, and the broker then boots with a correct
-// value it never has to change. The image makes this cheap — it declares
-// CMD ["/etc/kafka/docker/run"] and no ENTRYPOINT, so wrapping the command is
-// enough, and its Alpine base provides /bin/sh.
 func Start() (stop func(), err error) {
 	if !flag.Parsed() {
 		flag.Parse() // testing.Short() panics before flags are parsed
@@ -72,6 +61,53 @@ func Start() (stop func(), err error) {
 	}
 	ctx := context.Background()
 
+	ctr, err := runGatedBroker(ctx)
+	if err != nil {
+		return nil, err
+	}
+	abort := func(err error) (func(), error) {
+		_ = testcontainers.TerminateContainer(ctr)
+		return nil, err
+	}
+
+	broker, err := hostAddress(ctx, ctr)
+	if err != nil {
+		return abort(err)
+	}
+	if err := openStartGate(ctx, ctr, broker); err != nil {
+		return abort(err)
+	}
+	// Only now is Kafka actually starting, so this is where we wait for it.
+	if err := waitForBroker(ctx, broker, 3*time.Minute); err != nil {
+		return abort(err)
+	}
+
+	shared = &Kafka{brokers: []string{broker}}
+	return func() {
+		shared = nil
+		if err := testcontainers.TerminateContainer(ctr); err != nil {
+			fmt.Fprintf(os.Stderr, "kafkatest: terminate: %v\n", err)
+		}
+	}, nil
+}
+
+// runGatedBroker starts the container and returns once it is blocked on startGate,
+// before Kafka itself has booted.
+//
+// The gate exists because advertised.listeners has to name the *host-mapped* port,
+// which does not exist until the container is running — and it cannot be changed
+// afterwards. In Kafka 4.3.1,
+// DynamicBrokerConfig.DynamicListenerConfig.RECONFIGURABLE_CONFIGS covers listeners
+// and listener.security.protocol.map but not advertised.listeners, and
+// ALL_DYNAMIC_CONFIGS is built from those same sets, so kafka-configs.sh rejects it
+// as a non-dynamic config.
+//
+// So the boot waits instead: the command is wrapped in a shell that blocks until
+// startGate exists, and the broker then boots with a correct value it never has to
+// change. The image makes this cheap — it declares CMD ["/etc/kafka/docker/run"]
+// with no ENTRYPOINT, so wrapping the command is enough, and its Alpine base
+// provides /bin/sh.
+func runGatedBroker(ctx context.Context) (*testcontainers.DockerContainer, error) {
 	ctr, err := testcontainers.Run(ctx, Image,
 		testcontainers.WithExposedPorts("9092/tcp"),
 		testcontainers.WithEnv(map[string]string{
@@ -95,75 +131,57 @@ func Start() (stop func(), err error) {
 			// command below exports it from startGate once the port is known.
 		}),
 		testcontainers.WithCmd("/bin/sh", "-c",
-			"echo 'sagaflow: awaiting advertised listeners'; "+
+			"echo '"+gateOpened+"'; "+
 				"while [ ! -f "+startGate+" ]; do sleep 0.1; done; "+
 				"export KAFKA_ADVERTISED_LISTENERS=\"$(cat "+startGate+")\"; "+
 				"exec /etc/kafka/docker/run"),
-		// The gate is published by rename, not by writing in place — see the
-		// comment on the Exec below.
-		// Wait only for the gate message here — Kafka has not booted yet.
-		testcontainers.WithWaitStrategyAndDeadline(2*time.Minute,
-			wait.ForLog("sagaflow: awaiting advertised listeners")),
+		testcontainers.WithWaitStrategyAndDeadline(2*time.Minute, wait.ForLog(gateOpened)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("kafkatest: start %s: %w", Image, err)
 	}
+	return ctr, nil
+}
 
-	fail := func(format string, args ...any) (func(), error) {
-		_ = testcontainers.TerminateContainer(ctr)
-		return nil, fmt.Errorf("kafkatest: "+format, args...)
-	}
-
+// hostAddress is the host:port this test process can reach the broker on.
+func hostAddress(ctx context.Context, ctr *testcontainers.DockerContainer) (string, error) {
 	host, err := ctr.Host(ctx)
 	if err != nil {
-		return fail("host: %w", err)
+		return "", fmt.Errorf("kafkatest: host: %w", err)
 	}
 	port, err := ctr.MappedPort(ctx, "9092/tcp")
 	if err != nil {
-		return fail("mapped port: %w", err)
+		return "", fmt.Errorf("kafkatest: mapped port: %w", err)
 	}
-	broker := fmt.Sprintf("%s:%s", host, port.Port())
+	return fmt.Sprintf("%s:%s", host, port.Port()), nil
+}
 
-	// Open the gate. The broker now boots advertising the host-mapped address —
-	// a value it never has to change afterwards.
-	//
-	// Written to a temporary path and renamed into place, because `> file`
-	// creates and truncates before printf writes anything. The waiting shell
-	// tests only for existence, so an in-place write leaves a window — narrow,
-	// but real — where it sees the file, cats it empty, and boots the broker with
-	// no advertised listener at all. rename(2) is atomic within a filesystem, so
-	// the gate either does not exist or holds the whole value.
+// openStartGate writes the advertised listeners into startGate, releasing the boot.
+//
+// Written to a temporary path and renamed into place, because `> file` creates and
+// truncates before printf writes anything. The waiting shell tests only for
+// existence, so an in-place write leaves a window — narrow, but real — where it sees
+// the file, cats it empty, and boots the broker with no advertised listener at all.
+// rename(2) is atomic within a filesystem, so the gate either does not exist or
+// holds the whole value.
+func openStartGate(ctx context.Context, ctr *testcontainers.DockerContainer, broker string) error {
 	code, out, err := ctr.Exec(ctx, []string{"/bin/sh", "-c", fmt.Sprintf(
 		"printf '%%s' 'PLAINTEXT://%s,BROKER://localhost:19092' > %s.tmp && mv %s.tmp %s",
 		broker, startGate, startGate, startGate)})
 	if err != nil || code != 0 {
 		buf := make([]byte, 4096)
 		n, _ := out.Read(buf)
-		return fail("open start gate (code %d): %v: %s", code, err, buf[:n])
+		return fmt.Errorf("kafkatest: open start gate (code %d): %v: %s", code, err, buf[:n])
 	}
-
-	// Only now is Kafka actually starting, so this is where we wait for it —
-	// behaviourally, by asking it for metadata, rather than by matching a log
-	// line whose wording is not part of Kafka's public contract.
-	if err := waitForBroker(ctx, broker, 3*time.Minute); err != nil {
-		return fail("%w", err)
-	}
-
-	shared = &Kafka{brokers: []string{broker}}
-	return func() {
-		shared = nil
-		if err := testcontainers.TerminateContainer(ctr); err != nil {
-			fmt.Fprintf(os.Stderr, "kafkatest: terminate: %v\n", err)
-		}
-	}, nil
+	return nil
 }
 
 // waitForBroker polls until the broker answers a metadata request.
 //
 // kgo.Ping "returns whether any broker is reachable and that the client can
 // communicate with it" — which is the property tests actually need, and unlike a
-// log-line match it cannot silently start failing because Kafka reworded a
-// startup message.
+// log-line match it cannot silently start failing because Kafka reworded a startup
+// message.
 func waitForBroker(ctx context.Context, broker string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

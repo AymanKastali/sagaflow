@@ -2,6 +2,7 @@ package kafka_test
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -30,7 +31,48 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-const topic = "inventory.events"
+const (
+	topic = "inventory.events"
+	// latestVersion is the registry's selector for "whatever is current".
+	latestVersion = -1
+)
+
+// assertConfluentFraming checks a framed payload's header byte by byte, rather than
+// trusting the round trip.
+//
+// Encode and Decode are symmetric, so a serde that omitted the protobuf
+// message-index array entirely would still round-trip through itself while emitting
+// payloads no Confluent or Java consumer could read. That index is the whole
+// difference between Confluent *protobuf* framing and protobuf bytes behind an
+// Avro-shaped header, so it has to be checked against the wire.
+func assertConfluentFraming(t *testing.T, framed []byte, wantID int, want proto.Message) {
+	t.Helper()
+	const headerLen = 6 // magic byte, 4-byte schema id, one-byte index path
+
+	if len(framed) < headerLen {
+		t.Fatalf("framed payload too short: %d bytes", len(framed))
+	}
+	if framed[0] != 0x00 {
+		t.Fatalf("want magic byte 0x00, got 0x%02x", framed[0])
+	}
+	if id := int(binary.BigEndian.Uint32(framed[1:5])); id != wantID {
+		t.Fatalf("framed schema id %d is not the registered id %d", id, wantID)
+	}
+	// One top-level message per .proto file means the index path is [0], which the
+	// Confluent format shortens to a single zero byte.
+	if framed[5] != 0x00 {
+		t.Fatalf("want the [0] message-index shortcut at byte 5, got 0x%02x", framed[5])
+	}
+
+	// Everything after the header must be the bare protobuf encoding.
+	bare := want.ProtoReflect().New().Interface()
+	if err := proto.Unmarshal(framed[headerLen:], bare); err != nil {
+		t.Fatalf("payload after the header is not protobuf: %v", err)
+	}
+	if !proto.Equal(want, bare) {
+		t.Fatalf("payload after the header lost data:\n want %v\n got  %v", want, bare)
+	}
+}
 
 func client(t *testing.T, url string) *sr.Client {
 	t.Helper()
@@ -67,7 +109,7 @@ func TestSubjectUsesTopicRecordNameStrategy(t *testing.T) {
 }
 
 func TestSerdeRoundTripsThroughConfluentFraming(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cl := client(t, srtest.Shared(t).URL())
 	register(t, cl, topic, "../../../proto/sagaflow/inventory/v1/events.proto", &inventoryv1.SeatHeld{})
 
@@ -87,41 +129,11 @@ func TestSerdeRoundTripsThroughConfluentFraming(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-
-	// Assert the framing byte by byte rather than just the magic byte. Encode and
-	// Decode are symmetric, so a serde that omitted the protobuf message-index
-	// array entirely would still round-trip through itself here while emitting
-	// payloads no Confluent or Java consumer could read. The index is the whole
-	// difference between Confluent *protobuf* framing and protobuf bytes behind an
-	// Avro-shaped header, so it has to be checked against the wire, not the
-	// round trip.
-	if len(b) < 6 {
-		t.Fatalf("framed payload too short: %d bytes", len(b))
-	}
-	if b[0] != 0x00 {
-		t.Fatalf("want magic byte 0x00, got 0x%02x", b[0])
-	}
-	id := int(b[1])<<24 | int(b[2])<<16 | int(b[3])<<8 | int(b[4])
-	ss, err := cl.SchemaByVersion(ctx, kafka.Subject(topic, "sagaflow.inventory.v1.SeatHeld"), -1)
+	ss, err := cl.SchemaByVersion(ctx, kafka.Subject(topic, "sagaflow.inventory.v1.SeatHeld"), latestVersion)
 	if err != nil {
 		t.Fatalf("look up the registered id: %v", err)
 	}
-	if id != ss.ID {
-		t.Fatalf("framed schema id %d is not the registered id %d", id, ss.ID)
-	}
-	// One top-level message per .proto file means the index path is [0], which the
-	// Confluent format shortens to a single zero byte.
-	if b[5] != 0x00 {
-		t.Fatalf("want the [0] message-index shortcut at byte 5, got 0x%02x", b[5])
-	}
-	// Everything after the header must be the bare protobuf encoding.
-	var bare inventoryv1.SeatHeld
-	if err := proto.Unmarshal(b[6:], &bare); err != nil {
-		t.Fatalf("payload after the header is not protobuf: %v", err)
-	}
-	if !proto.Equal(want, &bare) {
-		t.Fatalf("payload after the header lost data:\n want %v\n got  %v", want, &bare)
-	}
+	assertConfluentFraming(t, b, ss.ID, want)
 
 	msg, err := s.Decode(b)
 	if err != nil {
@@ -137,7 +149,7 @@ func TestSerdeRoundTripsThroughConfluentFraming(t *testing.T) {
 }
 
 func TestBackwardCompatibilityRejectsAFieldTypeChange(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cl := client(t, srtest.Shared(t).URL())
 	const file = "../../../proto/sagaflow/inventory/v1/events.proto"
 	register(t, cl, topic, file, &inventoryv1.SeatHeld{})
@@ -169,7 +181,7 @@ func TestBackwardCompatibilityRejectsAFieldTypeChange(t *testing.T) {
 }
 
 func TestNewTopicSerdeFailsClosedOnUnregisteredSubject(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cl := client(t, srtest.Shared(t).URL())
 
 	// A topic no test registers anything for. Under TopicRecordNameStrategy the

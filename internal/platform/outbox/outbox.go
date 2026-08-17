@@ -10,6 +10,7 @@ package outbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -29,6 +30,21 @@ type Message struct {
 	Headers map[string]string
 }
 
+// validate rejects a message the poller could not publish correctly.
+func (m Message) validate() error {
+	switch {
+	case m.Topic == "":
+		return errors.New("no topic")
+	case m.Key == "":
+		// Without a key Kafka round-robins the record, which destroys the
+		// per-stream ordering every consumer downstream relies on.
+		return errors.New("no key")
+	case len(m.Payload) == 0:
+		return errors.New("no payload")
+	}
+	return nil
+}
+
 // Claimed is a Message plus the row id the poller must mark once it is published.
 type Claimed struct {
 	ID int64
@@ -42,6 +58,8 @@ type Publisher interface {
 	Publish(ctx context.Context, msgs []Claimed) error
 }
 
+// enqueueSQL inserts the whole batch in one statement. WITH ORDINALITY preserves
+// the caller's order in the generated ids, which is what the poller publishes by.
 const enqueueSQL = `
 INSERT INTO outbox (topic, key, payload, headers)
 SELECT t.topic, t.key, t.payload, t.headers
@@ -64,16 +82,8 @@ func Enqueue(ctx context.Context, tx pgx.Tx, msgs []Message) error {
 	headers := make([]string, len(msgs))
 
 	for i, m := range msgs {
-		if m.Topic == "" {
-			return fmt.Errorf("outbox: message %d has no topic", i)
-		}
-		if m.Key == "" {
-			// Without a key Kafka round-robins the record, which destroys the
-			// per-stream ordering every consumer downstream relies on.
-			return fmt.Errorf("outbox: message %d for %s has no key", i, m.Topic)
-		}
-		if len(m.Payload) == 0 {
-			return fmt.Errorf("outbox: message %d for %s has no payload", i, m.Topic)
+		if err := m.validate(); err != nil {
+			return fmt.Errorf("outbox: message %d for %q: %w", i, m.Topic, err)
 		}
 		h, err := json.Marshal(m.Headers)
 		if err != nil {

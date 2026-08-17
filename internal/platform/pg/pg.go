@@ -41,11 +41,9 @@ func WithTx(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error) erro
 		return fmt.Errorf("begin: %w", err)
 	}
 	// Deferred rather than called on the error path, so a panic inside fn also
-	// releases the connection instead of leaking it until the pool closes. After
-	// a successful Commit this is a no-op returning ErrTxClosed; the error is
-	// discarded because fn's error is the interesting one, and a genuine rollback
-	// failure means the connection is already gone, which pgx handles by
-	// discarding it from the pool.
+	// releases the connection. The error is discarded: after a successful Commit
+	// this is a no-op ErrTxClosed, and a real rollback failure means the connection
+	// is already gone, which pgx handles by discarding it from the pool.
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if err := fn(tx); err != nil {

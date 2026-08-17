@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -35,17 +36,7 @@ func TestMain(m *testing.M) {
 
 func newDB(t *testing.T, name string) *pgxpool.Pool {
 	t.Helper()
-	ctx := context.Background()
-	dsn := pgtest.Shared(t).DSN(t, name)
-	if err := pg.Migrate(ctx, dsn, migrations.FS); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	pool, err := pg.Open(ctx, dsn)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
+	return pgtest.Shared(t).Migrated(t, name, migrations.FS)
 }
 
 func msg(topic, key string) outbox.Message {
@@ -71,7 +62,7 @@ func countOutbox(t *testing.T, pool *pgxpool.Pool, where string) int {
 }
 
 func TestEnqueueCommitsWithTheHandler(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "outbox_commit")
 
 	err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
@@ -97,7 +88,7 @@ func TestEnqueueCommitsWithTheHandler(t *testing.T) {
 // This is the test that proves the outbox pattern rather than the outbox table:
 // a handler that fails must not leave a message behind to be published.
 func TestEnqueueRollsBackWithTheHandler(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "outbox_rollback")
 
 	sentinel := errors.New("handler failed after enqueue")
@@ -129,7 +120,7 @@ func TestEnqueueRollsBackWithTheHandler(t *testing.T) {
 }
 
 func TestEnqueuePreservesOrderAndHeaders(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "outbox_order")
 
 	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
@@ -142,52 +133,49 @@ func TestEnqueuePreservesOrderAndHeaders(t *testing.T) {
 		t.Fatalf("enqueue: %v", err)
 	}
 
+	type row struct {
+		Topic   string
+		Key     string
+		Payload []byte
+		Headers map[string]string
+	}
 	rows, err := pool.Query(ctx, `SELECT topic, key, payload, headers FROM outbox ORDER BY id`)
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	defer rows.Close()
-
-	type row struct {
-		topic, key string
-		payload    []byte
-		headers    map[string]string
-	}
-	var got []row
-	for rows.Next() {
-		var r row
-		if err := rows.Scan(&r.topic, &r.key, &r.payload, &r.headers); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		got = append(got, r)
+	got, err := pgx.CollectRows(rows, pgx.RowToStructByPos[row])
+	if err != nil {
+		t.Fatalf("read outbox: %v", err)
 	}
 	if len(got) != 3 {
 		t.Fatalf("want 3 rows, got %d", len(got))
 	}
+
 	// id order must match the order the caller passed, because the poller claims
 	// and publishes ORDER BY id and that is the only thing preserving per-stream
 	// ordering for two messages enqueued in one transaction.
-	wantKeys := []string{"seat-14A", "seat-14B", "seat-14C"}
-	for i, k := range wantKeys {
-		if got[i].key != k {
-			t.Fatalf("row %d: want key %s, got %s", i, k, got[i].key)
-		}
+	gotKeys := make([]string, 0, len(got))
+	for _, r := range got {
+		gotKeys = append(gotKeys, r.Key)
 	}
-	if got[2].topic != "inventory.commands" {
-		t.Fatalf("want third row on inventory.commands, got %s", got[2].topic)
+	if want := []string{"seat-14A", "seat-14B", "seat-14C"}; !slices.Equal(gotKeys, want) {
+		t.Fatalf("want keys %v in id order, got %v", want, gotKeys)
 	}
-	if got[0].headers["ce_id"] != "id-seat-14A" {
-		t.Fatalf("headers did not round-trip: %v", got[0].headers)
+	if got[2].Topic != "inventory.commands" {
+		t.Fatalf("want third row on inventory.commands, got %s", got[2].Topic)
+	}
+	if got[0].Headers["ce_id"] != "id-seat-14A" {
+		t.Fatalf("headers did not round-trip: %v", got[0].Headers)
 	}
 	// payload is BYTEA, not JSONB, so unlike events.data it is byte-preserving
 	// and can be compared exactly.
-	if len(got[0].payload) != 3 || got[0].payload[0] != 0x00 {
-		t.Fatalf("payload did not round-trip: %v", got[0].payload)
+	if !slices.Equal(got[0].Payload, []byte{0x00, 0x01, 0x02}) {
+		t.Fatalf("payload did not round-trip: %v", got[0].Payload)
 	}
 }
 
 func TestEnqueueEmptyIsANoOp(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "outbox_empty")
 
 	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
@@ -206,7 +194,7 @@ func TestEnqueueEmptyIsANoOp(t *testing.T) {
 // validation that is written and not exercised is indistinguishable from one
 // that was never written.
 func TestEnqueueRejectsIncompleteMessages(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "outbox_invalid")
 
 	for _, tc := range []struct {
@@ -273,7 +261,7 @@ func (f *fakePublisher) keys() []string {
 
 func enqueue(t *testing.T, pool *pgxpool.Pool, keys ...string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	msgs := make([]outbox.Message, len(keys))
 	for i, k := range keys {
 		msgs[i] = msg("inventory.events", k)
@@ -286,7 +274,7 @@ func enqueue(t *testing.T, pool *pgxpool.Pool, keys ...string) {
 }
 
 func TestDrainPublishesInIDOrderAndMarks(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "poller_order")
 	enqueue(t, pool, "seat-14A", "seat-14B", "seat-14C")
 
@@ -300,14 +288,8 @@ func TestDrainPublishesInIDOrderAndMarks(t *testing.T) {
 	}
 
 	want := []string{"seat-14A", "seat-14B", "seat-14C"}
-	got := pub.keys()
-	if len(got) != len(want) {
-		t.Fatalf("want %v, got %v", want, got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("want %v, got %v", want, got)
-		}
+	if got := pub.keys(); !slices.Equal(got, want) {
+		t.Fatalf("want %v published in id order, got %v", want, got)
 	}
 
 	if left := countOutbox(t, pool, "published_at IS NULL"); left != 0 {
@@ -316,7 +298,7 @@ func TestDrainPublishesInIDOrderAndMarks(t *testing.T) {
 }
 
 func TestDrainIsANoOpWhenNothingIsPending(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "poller_empty")
 
 	pub := &fakePublisher{}
@@ -335,7 +317,7 @@ func TestDrainIsANoOpWhenNothingIsPending(t *testing.T) {
 // A publish failure must leave the rows claimable. Marking them anyway would
 // lose the message permanently — the one failure this design must never have.
 func TestDrainLeavesRowsUnpublishedWhenPublishFails(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "poller_failure")
 	enqueue(t, pool, "seat-14A", "seat-14B")
 
@@ -365,7 +347,7 @@ func TestDrainLeavesRowsUnpublishedWhenPublishFails(t *testing.T) {
 // rather than treating it as a defect, so nobody later "fixes" it by marking
 // rows before the publish succeeds.
 func TestRepublishAfterAMarkFailureIsADuplicateNotALoss(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "poller_at_least_once")
 	enqueue(t, pool, "seat-14A")
 
@@ -389,7 +371,7 @@ func TestRepublishAfterAMarkFailureIsADuplicateNotALoss(t *testing.T) {
 }
 
 func TestPruneDeletesOldPublishedRowsOnly(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "poller_prune")
 	enqueue(t, pool, "seat-old", "seat-recent", "seat-pending")
 
@@ -472,7 +454,7 @@ func TestTryElectAllowsOnlyOnePoller(t *testing.T) {
 // Claiming by flag has no such window. This test passes for the implementation we
 // have and fails for a cursor, which is the only reason it is worth writing.
 func TestClaimByFlagSurvivesAnOutOfOrderCommit(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "poller_out_of_order")
 
 	// A inserts first, so it takes the lower id. It commits last.
@@ -525,9 +507,8 @@ func TestClaimByFlagSurvivesAnOutOfOrderCommit(t *testing.T) {
 			"commits after a higher one was published must not be skipped", n)
 	}
 
-	got := pub.keys()
 	want := []string{"higher-id", "lower-id"}
-	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+	if got := pub.keys(); !slices.Equal(got, want) {
 		t.Fatalf("want %v (published in commit order, not id order), got %v", want, got)
 	}
 
@@ -550,7 +531,7 @@ func TestClaimByFlagSurvivesAnOutOfOrderCommit(t *testing.T) {
 // here would not fail anything — it would just get slower for years — so the plan
 // shape is asserted rather than eyeballed once.
 func TestClaimUsesThePartialIndex(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "poller_index")
 
 	// A realistic shape: a long tail of published history, a short pending queue.
@@ -565,23 +546,15 @@ func TestClaimUsesThePartialIndex(t *testing.T) {
 		t.Fatalf("analyze: %v", err)
 	}
 
-	var plan string
 	rows, err := pool.Query(ctx, "EXPLAIN "+outbox.ClaimSQL, outbox.BatchSize)
 	if err != nil {
 		t.Fatalf("explain: %v", err)
 	}
-	for rows.Next() {
-		var line string
-		if err := rows.Scan(&line); err != nil {
-			rows.Close()
-			t.Fatalf("scan plan: %v", err)
-		}
-		plan += line + "\n"
+	lines, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatalf("read plan: %v", err)
 	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate plan: %v", err)
-	}
+	plan := strings.Join(lines, "\n")
 
 	if !strings.Contains(plan, "outbox_unpublished") {
 		t.Fatalf("the claim does not use the partial index:\n%s", plan)

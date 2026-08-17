@@ -1,7 +1,6 @@
 package pg_test
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -34,7 +33,7 @@ var schema = fstest.MapFS{
 }
 
 func TestMigrateCreatesSchemaAndIsIdempotent(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn := pgtest.Shared(t).DSN(t, "migrate_test")
 
 	if err := pg.Migrate(ctx, dsn, schema); err != nil {
@@ -57,7 +56,7 @@ func TestMigrateCreatesSchemaAndIsIdempotent(t *testing.T) {
 }
 
 func TestWithTxRollsBackOnError(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn := pgtest.Shared(t).DSN(t, "withtx_test")
 	if err := pg.Migrate(ctx, dsn, schema); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -89,7 +88,7 @@ func TestWithTxRollsBackOnError(t *testing.T) {
 }
 
 func TestWithTxCommitsOnSuccess(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn := pgtest.Shared(t).DSN(t, "withtx_commit_test")
 	if err := pg.Migrate(ctx, dsn, schema); err != nil {
 		t.Fatalf("migrate: %v", err)

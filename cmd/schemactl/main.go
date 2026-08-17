@@ -60,21 +60,28 @@ func run(ctx context.Context, registry string) error {
 	slog.Info("compatibility pinned", "level", "BACKWARD", "scope", "global")
 
 	for _, b := range bindings {
-		text, err := os.ReadFile(b.file)
-		if err != nil {
-			return fmt.Errorf("read %s: %w", b.file, err)
+		if err := register(ctx, cl, b); err != nil {
+			return err
 		}
-		name := string(b.msg.ProtoReflect().Descriptor().FullName())
-		subject := kafka.Subject(b.topic, name)
-
-		ss, err := cl.CreateSchema(ctx, subject, sr.Schema{
-			Schema: string(text),
-			Type:   sr.TypeProtobuf,
-		})
-		if err != nil {
-			return fmt.Errorf("register %s: %w", subject, err)
-		}
-		slog.Info("registered", "subject", subject, "id", ss.ID, "version", ss.Version)
 	}
+	return nil
+}
+
+// register uploads one binding's .proto under its TopicRecordNameStrategy subject.
+func register(ctx context.Context, cl *sr.Client, b binding) error {
+	text, err := os.ReadFile(b.file)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", b.file, err)
+	}
+	subject := kafka.Subject(b.topic, string(b.msg.ProtoReflect().Descriptor().FullName()))
+
+	ss, err := cl.CreateSchema(ctx, subject, sr.Schema{
+		Schema: string(text),
+		Type:   sr.TypeProtobuf,
+	})
+	if err != nil {
+		return fmt.Errorf("register %s: %w", subject, err)
+	}
+	slog.Info("registered", "subject", subject, "id", ss.ID, "version", ss.Version)
 	return nil
 }

@@ -46,9 +46,7 @@ func NewID() string {
 	return uuid.Must(uuid.NewV7()).String()
 }
 
-// Headers renders the envelope as Kafka headers. Optional attributes are omitted
-// entirely rather than written empty, because an empty ce_subject is a different
-// statement from an absent one.
+// Headers renders the envelope as Kafka headers.
 func (e Envelope) Headers() map[string]string {
 	h := map[string]string{
 		"ce_specversion": SpecVersion,
@@ -57,56 +55,50 @@ func (e Envelope) Headers() map[string]string {
 		"ce_type":        e.Type,
 		"content-type":   ContentType,
 	}
-	set := func(k, v string) {
-		if v != "" {
-			h[k] = v
+	// Optional attributes are omitted entirely rather than written empty: an empty
+	// ce_subject is a different statement from an absent one.
+	for key, value := range map[string]string{
+		"ce_subject":       e.Subject,
+		"ce_correlationid": e.CorrelationID,
+		"ce_causationid":   e.CausationID,
+		"traceparent":      e.TraceParent,
+	} {
+		if value != "" {
+			h[key] = value
 		}
 	}
-	set("ce_subject", e.Subject)
-	set("ce_correlationid", e.CorrelationID)
-	set("ce_causationid", e.CausationID)
-	set("traceparent", e.TraceParent)
 	return h
 }
 
 // Parse reads an envelope out of Kafka headers, rejecting anything that is not a
 // well-formed CloudEvent this system can handle.
 func Parse(h map[string]string) (Envelope, error) {
-	need := func(k string) (string, error) {
-		v, ok := h[k]
-		if !ok || v == "" {
-			return "", fmt.Errorf("%w: %s", ErrMissingAttribute, k)
-		}
-		return v, nil
-	}
-
-	sv, err := need("ce_specversion")
-	if err != nil {
-		return Envelope{}, err
-	}
-	if sv != SpecVersion {
+	switch sv := h["ce_specversion"]; sv {
+	case SpecVersion:
+	case "":
+		return Envelope{}, fmt.Errorf("%w: ce_specversion", ErrMissingAttribute)
+	default:
 		return Envelope{}, fmt.Errorf("envelope: unsupported ce_specversion %q, want %q", sv, SpecVersion)
 	}
 
-	var e Envelope
-	for _, f := range []struct {
-		key string
-		dst *string
-	}{
-		{"ce_id", &e.ID},
-		{"ce_source", &e.Source},
-		{"ce_type", &e.Type},
-	} {
-		v, err := need(f.key)
-		if err != nil {
-			return Envelope{}, err
-		}
-		*f.dst = v
+	e := Envelope{
+		ID:            h["ce_id"],
+		Source:        h["ce_source"],
+		Type:          h["ce_type"],
+		Subject:       h["ce_subject"],
+		CorrelationID: h["ce_correlationid"],
+		CausationID:   h["ce_causationid"],
+		TraceParent:   h["traceparent"],
 	}
-
-	e.Subject = h["ce_subject"]
-	e.CorrelationID = h["ce_correlationid"]
-	e.CausationID = h["ce_causationid"]
-	e.TraceParent = h["traceparent"]
+	// An attribute that is present but empty is as unusable as an absent one.
+	for _, required := range []struct{ key, value string }{
+		{"ce_id", e.ID},
+		{"ce_source", e.Source},
+		{"ce_type", e.Type},
+	} {
+		if required.value == "" {
+			return Envelope{}, fmt.Errorf("%w: %s", ErrMissingAttribute, required.key)
+		}
+	}
 	return e, nil
 }

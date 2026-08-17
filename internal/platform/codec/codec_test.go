@@ -1,7 +1,6 @@
 package codec_test
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -116,16 +115,8 @@ func TestDecodeMalformedJSONIsAnError(t *testing.T) {
 }
 
 func TestRoundTripThroughPostgres(t *testing.T) {
-	ctx := context.Background()
-	dsn := pgtest.Shared(t).DSN(t, "codec_roundtrip")
-	if err := pg.Migrate(ctx, dsn, migrations.FS); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	pool, err := pg.Open(ctx, dsn)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer pool.Close()
+	ctx := t.Context()
+	pool := pgtest.Shared(t).Migrated(t, "codec_roundtrip", migrations.FS)
 
 	want := seatHeld()
 	e, err := codec.Encode(want, eventstore.Meta{TraceID: "t-1"})

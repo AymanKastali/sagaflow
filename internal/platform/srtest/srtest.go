@@ -18,7 +18,13 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-const Image = "apicurio/apicurio-registry:3.3.1"
+const (
+	Image = "apicurio/apicurio-registry:3.3.1"
+	port  = "8080/tcp"
+	// ccompatPath is the prefix Apicurio serves the Confluent-shaped API under. It
+	// is part of the URL, not an optional extra — see the package comment.
+	ccompatPath = "/apis/ccompat/v7"
+)
 
 type Registry struct{ url string }
 
@@ -54,8 +60,29 @@ func Start() (stop func(), err error) {
 	}
 	ctx := context.Background()
 
+	ctr, err := runRegistry(ctx)
+	if err != nil {
+		return nil, err
+	}
+	addr, err := hostAddress(ctx, ctr)
+	if err != nil {
+		_ = testcontainers.TerminateContainer(ctr)
+		return nil, err
+	}
+
+	shared = &Registry{url: "http://" + addr + ccompatPath}
+	return func() {
+		shared = nil
+		if err := testcontainers.TerminateContainer(ctr); err != nil {
+			fmt.Fprintf(os.Stderr, "srtest: terminate: %v\n", err)
+		}
+	}, nil
+}
+
+// runRegistry starts the container and waits for it to answer on its own API.
+func runRegistry(ctx context.Context) (*testcontainers.DockerContainer, error) {
 	ctr, err := testcontainers.Run(ctx, Image,
-		testcontainers.WithExposedPorts("8080/tcp"),
+		testcontainers.WithExposedPorts(port),
 		testcontainers.WithEnv(map[string]string{
 			// Apicurio 3.x has no "mem" storage kind; sql over in-memory H2 is
 			// its ephemeral store. Set explicitly so a registry started for a
@@ -64,31 +91,23 @@ func Start() (stop func(), err error) {
 			"APICURIO_STORAGE_SQL_KIND": "h2",
 		}),
 		testcontainers.WithWaitStrategyAndDeadline(2*time.Minute,
-			wait.ForHTTP("/apis/registry/v3/system/info").WithPort("8080/tcp")),
+			wait.ForHTTP("/apis/registry/v3/system/info").WithPort(port)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("srtest: start %s: %w", Image, err)
 	}
+	return ctr, nil
+}
 
-	fail := func(format string, args ...any) (func(), error) {
-		_ = testcontainers.TerminateContainer(ctr)
-		return nil, fmt.Errorf("srtest: "+format, args...)
-	}
-
+// hostAddress is the host:port this test process can reach the registry on.
+func hostAddress(ctx context.Context, ctr *testcontainers.DockerContainer) (string, error) {
 	host, err := ctr.Host(ctx)
 	if err != nil {
-		return fail("host: %w", err)
+		return "", fmt.Errorf("srtest: host: %w", err)
 	}
-	port, err := ctr.MappedPort(ctx, "8080/tcp")
+	mapped, err := ctr.MappedPort(ctx, port)
 	if err != nil {
-		return fail("mapped port: %w", err)
+		return "", fmt.Errorf("srtest: mapped port: %w", err)
 	}
-
-	shared = &Registry{url: fmt.Sprintf("http://%s:%s/apis/ccompat/v7", host, port.Port())}
-	return func() {
-		shared = nil
-		if err := testcontainers.TerminateContainer(ctr); err != nil {
-			fmt.Fprintf(os.Stderr, "srtest: terminate: %v\n", err)
-		}
-	}, nil
+	return host + ":" + mapped.Port(), nil
 }

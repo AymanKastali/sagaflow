@@ -32,6 +32,9 @@ type Serde struct {
 	topic string
 }
 
+// latestVersion is the version selector meaning "whatever is current".
+const latestVersion = -1
+
 // NewTopicSerde resolves each prototype's schema id from the registry and builds
 // a serde for that topic.
 //
@@ -44,32 +47,29 @@ func NewTopicSerde(ctx context.Context, cl *sr.Client, topic string, prototypes 
 	}
 	inner := sr.NewSerde(sr.Header(&sr.ConfluentHeader{}))
 
-	for _, p := range prototypes {
-		name := string(p.ProtoReflect().Descriptor().FullName())
-		subject := Subject(topic, name)
-
-		ss, err := cl.SchemaByVersion(ctx, subject, -1) // -1 is "latest"
+	for _, prototype := range prototypes {
+		subject := Subject(topic, string(prototype.ProtoReflect().Descriptor().FullName()))
+		schema, err := cl.SchemaByVersion(ctx, subject, latestVersion)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s: %w", ErrSubjectNotRegistered, subject, err)
 		}
-
-		// Index [0] identifies the first top-level message in the .proto file,
-		// which is why every file in this project holds exactly one.
-		prototype := p
-		inner.Register(ss.ID, prototype,
-			sr.Index(0),
-			sr.EncodeFn(func(v any) ([]byte, error) {
-				return proto.Marshal(v.(proto.Message))
-			}),
-			sr.DecodeFn(func(b []byte, v any) error {
-				return proto.Unmarshal(b, v.(proto.Message))
-			}),
-			sr.GenerateFn(func() any {
-				return prototype.ProtoReflect().New().Interface()
-			}),
-		)
+		register(inner, schema.ID, prototype)
 	}
 	return &Serde{inner: inner, topic: topic}, nil
+}
+
+// register teaches inner to frame one message type under its registered schema id.
+//
+// sr.Index(0) names the first top-level message in the .proto file, which is why
+// every file in this project holds exactly one. Leaving it out still round-trips
+// through this package while emitting payloads no other Confluent client can read.
+func register(inner *sr.Serde, id int, prototype proto.Message) {
+	inner.Register(id, prototype,
+		sr.Index(0),
+		sr.EncodeFn(func(v any) ([]byte, error) { return proto.Marshal(v.(proto.Message)) }),
+		sr.DecodeFn(func(b []byte, v any) error { return proto.Unmarshal(b, v.(proto.Message)) }),
+		sr.GenerateFn(func() any { return prototype.ProtoReflect().New().Interface() }),
+	)
 }
 
 // Encode frames a message for the wire.

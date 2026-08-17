@@ -14,12 +14,15 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kptac/sagaflow/internal/platform/pg"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
@@ -103,27 +106,7 @@ func (p *PG) DSN(t *testing.T, dbName string) string {
 	defer p.mu.Unlock()
 
 	if !p.created[dbName] {
-		ctx := context.Background()
-		conn, err := pgx.Connect(ctx, p.baseDSN)
-		if err != nil {
-			t.Fatalf("connect admin: %v", err)
-		}
-		defer conn.Close(ctx)
-		// CREATE DATABASE takes no parameters, so the name has to be
-		// interpolated. pgx.Identifier does the quoting and escaping; fmt's %q
-		// only looks right because Go and SQL happen to share the double quote.
-		name := pgx.Identifier{dbName}.Sanitize()
-		// Drop first. Database names come from test names, so `go test -count=2`
-		// asks for the same name twice in one process; without this the second run
-		// inherits the first run's rows and fails on counts and version conflicts
-		// that have nothing to do with the code under test. FORCE so a leaked
-		// connection cannot wedge the whole suite.
-		if _, err := conn.Exec(ctx, "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)"); err != nil {
-			t.Fatalf("drop stale database %s: %v", dbName, err)
-		}
-		if _, err := conn.Exec(ctx, "CREATE DATABASE "+name); err != nil {
-			t.Fatalf("create database %s: %v", dbName, err)
-		}
+		p.recreate(t, dbName)
 		p.created[dbName] = true
 		// Forget the name when this test ends, so a repeat run recreates it rather
 		// than reusing it. Cleanups run last-in-first-out, so the test's own pool
@@ -139,6 +122,53 @@ func (p *PG) DSN(t *testing.T, dbName string) string {
 		t.Fatalf("build dsn for %s: %v", dbName, err)
 	}
 	return dsn
+}
+
+// Migrated is DSN plus the two steps every integration test takes next: apply
+// fsys's migrations and open a pool, closed when the test ends.
+func (p *PG) Migrated(t *testing.T, dbName string, fsys fs.FS) *pgxpool.Pool {
+	t.Helper()
+	ctx := context.Background()
+	dsn := p.DSN(t, dbName)
+	if err := pg.Migrate(ctx, dsn, fsys); err != nil {
+		t.Fatalf("migrate %s: %v", dbName, err)
+	}
+	pool, err := pg.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open %s: %v", dbName, err)
+	}
+	// Registered after DSN's cleanup, so it runs first: the pool is closed before
+	// the database name is released for recreation.
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+// recreate drops dbName if it is already there and creates it empty.
+//
+// The drop is what makes `go test -count=2` work: database names come from test
+// names, so the second run asks for a name the first run populated. Without it the
+// second run inherits those rows and fails on counts and version conflicts that
+// have nothing to do with the code under test. FORCE so a leaked connection cannot
+// wedge the whole suite.
+func (p *PG) recreate(t *testing.T, dbName string) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, p.baseDSN)
+	if err != nil {
+		t.Fatalf("connect admin: %v", err)
+	}
+	defer conn.Close(ctx)
+
+	// CREATE DATABASE takes no parameters, so the name has to be interpolated.
+	// pgx.Identifier does the quoting and escaping; fmt's %q only looks right
+	// because Go and SQL happen to share the double quote.
+	name := pgx.Identifier{dbName}.Sanitize()
+	if _, err := conn.Exec(ctx, "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)"); err != nil {
+		t.Fatalf("drop stale database %s: %v", dbName, err)
+	}
+	if _, err := conn.Exec(ctx, "CREATE DATABASE "+name); err != nil {
+		t.Fatalf("create database %s: %v", dbName, err)
+	}
 }
 
 // replaceDBName points a DSN at a different database, preserving everything else

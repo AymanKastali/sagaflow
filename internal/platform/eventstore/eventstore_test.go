@@ -1,11 +1,12 @@
 package eventstore_test
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -32,21 +33,11 @@ func TestMain(m *testing.M) {
 
 func newDB(t *testing.T, name string) *pgxpool.Pool {
 	t.Helper()
-	ctx := context.Background()
-	dsn := pgtest.Shared(t).DSN(t, name)
-	if err := pg.Migrate(ctx, dsn, migrations.FS); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	pool, err := pg.Open(ctx, dsn)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
+	return pgtest.Shared(t).Migrated(t, name, migrations.FS)
 }
 
 func TestSchemaRejectsDuplicateStreamVersion(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "eventstore_schema")
 
 	const ins = `INSERT INTO events (stream_id, version, type, data, meta)
@@ -62,7 +53,7 @@ func TestSchemaRejectsDuplicateStreamVersion(t *testing.T) {
 }
 
 func TestSchemaHasNoRedundantIndex(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "eventstore_index")
 
 	rows, err := pool.Query(ctx,
@@ -70,21 +61,14 @@ func TestSchemaHasNoRedundantIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query indexes: %v", err)
 	}
-	defer rows.Close()
-
-	var n int
-	for rows.Next() {
-		var def string
-		if err := rows.Scan(&def); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		n++
-		t.Logf("index: %s", def)
+	defs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatalf("read indexes: %v", err)
 	}
 	// Exactly two: the global_seq primary key and the (stream_id, version)
 	// unique constraint. A third means someone re-added the redundant index.
-	if n != 2 {
-		t.Fatalf("want exactly 2 indexes on events, got %d", n)
+	if len(defs) != 2 {
+		t.Fatalf("want exactly 2 indexes on events, got %d:\n%s", len(defs), strings.Join(defs, "\n"))
 	}
 }
 
@@ -97,7 +81,7 @@ func ev(t string) eventstore.Event {
 }
 
 func TestAppendAssignsSequentialVersions(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "append_versions")
 
 	err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
@@ -113,30 +97,22 @@ func TestAppendAssignsSequentialVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	defer rows.Close()
-
-	var got []string
-	want := []string{"1:A", "2:B", "3:C"}
-	for rows.Next() {
-		var v int
+	got, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (string, error) {
+		var version int
 		var typ string
-		if err := rows.Scan(&v, &typ); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		got = append(got, fmt.Sprintf("%d:%s", v, typ))
+		err := r.Scan(&version, &typ)
+		return fmt.Sprintf("%d:%s", version, typ), err
+	})
+	if err != nil {
+		t.Fatalf("read events: %v", err)
 	}
-	if len(got) != len(want) {
+	if want := []string{"1:A", "2:B", "3:C"}; !slices.Equal(got, want) {
 		t.Fatalf("want %v, got %v", want, got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("want %v, got %v", want, got)
-		}
 	}
 }
 
 func TestAppendStaleExpectedVersionReturnsErrVersionConflict(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "append_stale")
 
 	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
@@ -155,7 +131,7 @@ func TestAppendStaleExpectedVersionReturnsErrVersionConflict(t *testing.T) {
 }
 
 func TestAppendConcurrentWritersExactlyOneWins(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "append_race")
 
 	// This is the test the whole optimistic-concurrency design exists for, and
@@ -208,7 +184,7 @@ func TestAppendConcurrentWritersExactlyOneWins(t *testing.T) {
 }
 
 func TestAppendEmptySliceIsANoOp(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "append_empty")
 
 	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
@@ -226,7 +202,7 @@ func TestAppendEmptySliceIsANoOp(t *testing.T) {
 }
 
 func TestLoadReturnsEventsInVersionOrder(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "load_order")
 
 	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
@@ -282,7 +258,7 @@ func TestLoadReturnsEventsInVersionOrder(t *testing.T) {
 }
 
 func TestLoadUnknownStreamIsEmptyNotError(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "load_missing")
 
 	var got []eventstore.Recorded
@@ -299,7 +275,7 @@ func TestLoadUnknownStreamIsEmptyNotError(t *testing.T) {
 }
 
 func TestLoadIsolatesStreams(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := newDB(t, "load_isolation")
 
 	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {

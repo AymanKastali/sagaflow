@@ -8,19 +8,22 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
-	// BatchSize bounds one claim. Spec §10.3.
+	// BatchSize bounds one claim (spec §10.3).
 	BatchSize = 100
 	// AdvisoryLockKey elects the single active poller per database.
 	AdvisoryLockKey = 0x5A6A_0001
-	// PollFloor is the ticker interval that backs up LISTEN/NOTIFY, so a missed
+	// PollFloor is the ticker interval backing up LISTEN/NOTIFY, so a missed
 	// notification costs a second of latency rather than a stuck queue.
 	PollFloor = time.Second
 	// Retention is how long published rows are kept for after-the-fact auditing.
 	Retention = 7 * 24 * time.Hour
+	// pruneInterval is how often rows older than Retention are deleted.
+	pruneInterval = time.Hour
 )
 
 // Poller publishes committed outbox rows.
@@ -34,6 +37,125 @@ func NewPoller(pool *pgxpool.Pool, pub Publisher) *Poller {
 	return &Poller{pool: pool, pub: pub, log: slog.Default()}
 }
 
+// Run elects this poller and publishes until ctx is cancelled. A poller that
+// loses the election waits, ready to take over if the winner goes away.
+func (p *Poller) Run(ctx context.Context) error {
+	held, release, err := p.TryElect(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if !held {
+		p.log.Info("outbox poller standing by; another instance holds the lock")
+		<-ctx.Done()
+		return nil
+	}
+
+	woken, stopListening, err := p.listen(ctx)
+	if err != nil {
+		return err
+	}
+	defer stopListening()
+
+	// The ticker is not redundant with NOTIFY: Postgres coalesces a notification
+	// that arrives mid-batch, and a dropped listener connection would otherwise
+	// leave the queue stalled.
+	poll := time.NewTicker(PollFloor)
+	defer poll.Stop()
+	prune := time.NewTicker(pruneInterval)
+	defer prune.Stop()
+
+	for {
+		p.drainAll(ctx)
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-woken:
+		case <-poll.C:
+		case <-prune.C:
+			p.pruneOldRows(ctx)
+		}
+	}
+}
+
+// drainAll publishes everything currently committed. A batch that filled
+// BatchSize means more is waiting, so it keeps draining until one does not.
+//
+// Failures are logged rather than returned: the next wake-up retries, and the
+// rows stay claimable in the meantime.
+func (p *Poller) drainAll(ctx context.Context) {
+	for {
+		n, err := p.Drain(ctx)
+		if err != nil {
+			if ctx.Err() == nil {
+				p.log.Error("outbox drain failed; retrying", "error", err)
+			}
+			return
+		}
+		if n < BatchSize {
+			return
+		}
+	}
+}
+
+// pruneOldRows deletes published rows past Retention. Housekeeping must never
+// stop publishing, so a failure is logged and the loop carries on.
+func (p *Poller) pruneOldRows(ctx context.Context) {
+	deleted, err := p.Prune(ctx, Retention)
+	switch {
+	case err != nil:
+		p.log.Error("outbox prune failed", "error", err)
+	case deleted > 0:
+		p.log.Info("pruned published outbox rows", "deleted", deleted)
+	}
+}
+
+// listen subscribes to NotifyChannel and returns a channel that fires when there
+// may be work. Wake-ups are coalesced, so it is a hint to drain, not a count.
+//
+// Call stop once ctx is cancelled: it waits for the listening goroutine before
+// returning the connection to the pool, because a pooled connection can be handed
+// straight to another caller while that goroutine is still reading from it.
+func (p *Poller) listen(ctx context.Context) (woken <-chan struct{}, stop func(), err error) {
+	conn, err := p.pool.Acquire(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("outbox: acquire listen conn: %w", err)
+	}
+	if _, err := conn.Exec(ctx, "LISTEN "+NotifyChannel); err != nil {
+		conn.Release()
+		return nil, nil, fmt.Errorf("outbox: listen: %w", err)
+	}
+
+	wake := make(chan struct{}, 1)
+	var listener sync.WaitGroup
+	listener.Go(func() {
+		for {
+			if _, err := conn.Conn().WaitForNotification(ctx); err != nil {
+				return // ctx cancelled, or the connection went away
+			}
+			select {
+			case wake <- struct{}{}:
+			default: // a wake-up is already pending; coalesce
+			}
+		}
+	})
+	return wake, func() {
+		listener.Wait()
+		conn.Release()
+	}, nil
+}
+
+// claimSQL takes unpublished rows and holds them for this transaction.
+//
+// Rows are claimed by flag, never by a cursor over id. BIGSERIAL values are
+// handed out at insert but become visible at commit, so a late-committing row can
+// carry a lower id than one already published — a cursor would step over it and
+// lose it silently, only under concurrency (spec §6.4). A flag has no such
+// window: whatever is still NULL gets claimed on the next pass.
+//
+// SKIP LOCKED is for failover, not throughput: a second poller taking over mid
+// batch makes progress instead of blocking on the previous one's rows.
 const claimSQL = `
 SELECT id, topic, key, payload, headers
 FROM outbox
@@ -46,16 +168,10 @@ const markSQL = `UPDATE outbox SET published_at = now() WHERE id = ANY($1)`
 
 // Drain runs one claim-publish-mark cycle and returns how many rows it published.
 //
-// Rows are claimed by flag, never by a cursor over id. BIGSERIAL values become
-// visible at commit, not at insert, so a late-committing row can carry a lower id
-// than a row already published — a cursor would step over it and lose it
-// silently, and only under concurrency (spec §6.4). A flag has no such window:
-// whatever is still NULL gets claimed on the next pass.
-//
 // Publishing happens inside the claiming transaction. That holds a database
 // transaction open for the duration of a Kafka round trip, which is the accepted
-// cost of the alternative being worse: mark-then-publish loses messages, and
-// publish-outside-the-lock lets a second poller claim the same rows.
+// cost of the alternatives being worse: mark-then-publish loses messages, and
+// publishing after the commit lets a second poller claim the same rows.
 func (p *Poller) Drain(ctx context.Context) (int, error) {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
@@ -63,34 +179,9 @@ func (p *Poller) Drain(ctx context.Context) (int, error) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	rows, err := tx.Query(ctx, claimSQL, BatchSize)
+	claimed, err := claim(ctx, tx)
 	if err != nil {
-		return 0, fmt.Errorf("outbox: claim: %w", err)
-	}
-
-	var (
-		claimed []Claimed
-		ids     []int64
-	)
-	for rows.Next() {
-		var (
-			c           Claimed
-			headersJSON []byte
-		)
-		if err := rows.Scan(&c.ID, &c.Topic, &c.Key, &c.Payload, &headersJSON); err != nil {
-			rows.Close()
-			return 0, fmt.Errorf("outbox: scan claimed row: %w", err)
-		}
-		if err := json.Unmarshal(headersJSON, &c.Headers); err != nil {
-			rows.Close()
-			return 0, fmt.Errorf("outbox: unmarshal headers for row %d: %w", c.ID, err)
-		}
-		claimed = append(claimed, c)
-		ids = append(ids, c.ID)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("outbox: iterate claimed rows: %w", err)
+		return 0, err
 	}
 	if len(claimed) == 0 {
 		return 0, nil
@@ -100,19 +191,55 @@ func (p *Poller) Drain(ctx context.Context) (int, error) {
 		// Rolling back releases the claim, so the rows are picked up next pass.
 		return 0, fmt.Errorf("outbox: publish %d messages: %w", len(claimed), err)
 	}
-	if _, err := tx.Exec(ctx, markSQL, ids); err != nil {
+	if _, err := tx.Exec(ctx, markSQL, ids(claimed)); err != nil {
 		return 0, fmt.Errorf("outbox: mark published: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		// The messages are already on the broker; the next pass republishes them.
-		// At-least-once, absorbed by the inbox.
+		// The messages are already on the broker, so the next pass republishes
+		// them: at-least-once, absorbed by the inbox.
 		return 0, fmt.Errorf("outbox: commit mark: %w", err)
 	}
 	return len(claimed), nil
 }
 
+// claim reads and locks up to BatchSize unpublished rows, oldest first.
+func claim(ctx context.Context, tx pgx.Tx) ([]Claimed, error) {
+	rows, err := tx.Query(ctx, claimSQL, BatchSize)
+	if err != nil {
+		return nil, fmt.Errorf("outbox: claim: %w", err)
+	}
+	defer rows.Close()
+
+	var claimed []Claimed
+	for rows.Next() {
+		var (
+			c           Claimed
+			headersJSON []byte
+		)
+		if err := rows.Scan(&c.ID, &c.Topic, &c.Key, &c.Payload, &headersJSON); err != nil {
+			return nil, fmt.Errorf("outbox: scan claimed row: %w", err)
+		}
+		if err := json.Unmarshal(headersJSON, &c.Headers); err != nil {
+			return nil, fmt.Errorf("outbox: unmarshal headers for row %d: %w", c.ID, err)
+		}
+		claimed = append(claimed, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("outbox: iterate claimed rows: %w", err)
+	}
+	return claimed, nil
+}
+
+func ids(claimed []Claimed) []int64 {
+	out := make([]int64, len(claimed))
+	for i, c := range claimed {
+		out[i] = c.ID
+	}
+	return out
+}
+
 // Prune deletes rows published longer ago than olderThan. The events themselves
-// are already durable in the events table, so this window exists only so a
+// are already durable in the events table, so this window exists only so that a
 // publish can be audited after the fact.
 func (p *Poller) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	tag, err := p.pool.Exec(ctx,
@@ -124,7 +251,9 @@ func (p *Poller) Prune(ctx context.Context, olderThan time.Duration) (int64, err
 	return tag.RowsAffected(), nil
 }
 
-// TryElect attempts to become the single active poller for this database.
+// TryElect attempts to become the single active poller for this database. The
+// returned release is idempotent, so `defer release()` alongside an explicit
+// release on the hand-over path is safe.
 //
 // The lock is session-scoped, held on one dedicated connection for as long as
 // this poller runs, and released when that connection goes away — so a crashed
@@ -143,10 +272,9 @@ func (p *Poller) TryElect(ctx context.Context) (held bool, release func(), err e
 		conn.Release()
 		return false, func() {}, nil
 	}
-	// release is idempotent. The natural calling pattern is `defer release()` plus
-	// an explicit release on the hand-over path, and a pooled connection that has
-	// already gone back to the pool panics on use — pgxpool.Conn.Exec dereferences
-	// a nil resource — so calling twice must be safe rather than fatal.
+
+	// Guarded by Once because a pooled connection panics when used after it has
+	// gone back to the pool: pgxpool.Conn.Exec dereferences a nil resource.
 	var once sync.Once
 	return true, func() {
 		once.Do(func() {
@@ -157,87 +285,4 @@ func (p *Poller) TryElect(ctx context.Context) (held bool, release func(), err e
 			conn.Release()
 		})
 	}, nil
-}
-
-// Run elects this poller and then publishes until ctx is cancelled.
-//
-// It wakes on NOTIFY and on a PollFloor ticker. The ticker is not redundant: a
-// notification delivered while the poller was mid-batch is coalesced by Postgres,
-// and a dropped listener connection would otherwise leave the queue stalled.
-func (p *Poller) Run(ctx context.Context) error {
-	held, release, err := p.TryElect(ctx)
-	if err != nil {
-		return err
-	}
-	if !held {
-		p.log.Info("outbox poller standing by; another instance holds the lock")
-		<-ctx.Done()
-		return nil
-	}
-	defer release()
-
-	listenConn, err := p.pool.Acquire(ctx)
-	if err != nil {
-		return fmt.Errorf("outbox: acquire listen conn: %w", err)
-	}
-	if _, err := listenConn.Exec(ctx, "LISTEN "+NotifyChannel); err != nil {
-		listenConn.Release()
-		return fmt.Errorf("outbox: listen: %w", err)
-	}
-
-	notified := make(chan struct{}, 1)
-	var listener sync.WaitGroup
-	listener.Go(func() {
-		for {
-			if _, err := listenConn.Conn().WaitForNotification(ctx); err != nil {
-				return // ctx cancelled, or the connection went away
-			}
-			select {
-			case notified <- struct{}{}:
-			default: // a wake-up is already pending; coalesce
-			}
-		}
-	})
-	// Wait for the listener to stop before releasing its connection: a released
-	// connection goes back to the pool and may be handed to another caller, so a
-	// goroutine still inside WaitForNotification on it is a use-after-free.
-	defer func() {
-		listener.Wait()
-		listenConn.Release()
-	}()
-
-	ticker := time.NewTicker(PollFloor)
-	defer ticker.Stop()
-	pruneTicker := time.NewTicker(time.Hour)
-	defer pruneTicker.Stop()
-
-	for {
-		// Drain fully: a batch that filled BatchSize means more is waiting.
-		for {
-			n, err := p.Drain(ctx)
-			if err != nil {
-				if ctx.Err() != nil {
-					return nil
-				}
-				p.log.Error("outbox drain failed; retrying", "error", err)
-				break
-			}
-			if n < BatchSize {
-				break
-			}
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-notified:
-		case <-ticker.C:
-		case <-pruneTicker.C:
-			if deleted, err := p.Prune(ctx, Retention); err != nil {
-				p.log.Error("outbox prune failed", "error", err)
-			} else if deleted > 0 {
-				p.log.Info("pruned published outbox rows", "deleted", deleted)
-			}
-		}
-	}
 }

@@ -32,6 +32,17 @@ type Event struct {
 	Meta Meta
 }
 
+// validate rejects an event that could never be folded back into state.
+func (e Event) validate() error {
+	switch {
+	case e.Type == "":
+		return errors.New("no type")
+	case len(e.Data) == 0:
+		return errors.New("no data")
+	}
+	return nil
+}
+
 // Recorded is an event read back from the log.
 type Recorded struct {
 	Event
@@ -64,11 +75,8 @@ func Append(ctx context.Context, tx pgx.Tx, streamID string, expectedVersion int
 	data := make([]string, len(evts))
 	meta := make([]string, len(evts))
 	for i, e := range evts {
-		if e.Type == "" {
-			return fmt.Errorf("eventstore: event %d has no type", i)
-		}
-		if len(e.Data) == 0 {
-			return fmt.Errorf("eventstore: event %d (%s) has no data", i, e.Type)
+		if err := e.validate(); err != nil {
+			return fmt.Errorf("eventstore: event %d (%q): %w", i, e.Type, err)
 		}
 		m, err := json.Marshal(e.Meta)
 		if err != nil {
@@ -82,7 +90,7 @@ func Append(ctx context.Context, tx pgx.Tx, streamID string, expectedVersion int
 	_, err := tx.Exec(ctx, appendSQL, streamID, expectedVersion, types, data, meta)
 	if err != nil {
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 			return ErrVersionConflict
 		}
 		return fmt.Errorf("eventstore: append to %s at %d: %w", streamID, expectedVersion, err)
