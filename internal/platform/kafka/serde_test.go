@@ -12,21 +12,30 @@ import (
 
 	inventoryv1 "github.com/kptac/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
 	"github.com/kptac/sagaflow/internal/platform/kafka"
+	"github.com/kptac/sagaflow/internal/platform/kafkatest"
 	"github.com/kptac/sagaflow/internal/platform/srtest"
 	"github.com/twmb/franz-go/pkg/sr"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// One registry for the package (spec §12.4). Phase 4b adds kafkatest.Start to
-// this same function when this package gains a producer and a consumer.
+// One registry and one broker for the whole package (spec §12.4): the serde tests
+// need the registry, the producer and consumer tests need the broker, and starting
+// either per test would dominate the suite's runtime.
 func TestMain(m *testing.M) {
 	stopRegistry, err := srtest.Start()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	stopKafka, err := kafkatest.Start()
+	if err != nil {
+		stopRegistry()
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	code := m.Run()
+	stopKafka()
 	stopRegistry()
 	os.Exit(code)
 }
