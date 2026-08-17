@@ -280,7 +280,13 @@ services:
     image: apicurio/apicurio-registry:3.3.1
     ports: ["8080:8080"]
     environment:
-      APICURIO_STORAGE_KIND: mem
+      # Apicurio 3.x has no "mem" storage kind — that was a separate 2.x image
+      # (apicurio-registry-mem), and RegistryStorageProducer in 3.3.1 accepts
+      # only sql, kafkasql, gitops and kubernetesops. The ephemeral dev store is
+      # sql over in-memory H2, which is 3.x's default; it is set explicitly here
+      # so the storage a local registry uses is visible rather than inherited.
+      APICURIO_STORAGE_KIND: sql
+      APICURIO_STORAGE_SQL_KIND: h2
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/apis/registry/v3/system/info || exit 1"]
       interval: 5s

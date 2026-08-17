@@ -405,7 +405,11 @@ func Start() (stop func(), err error) {
 	ctr, err := testcontainers.Run(ctx, Image,
 		testcontainers.WithExposedPorts("8080/tcp"),
 		testcontainers.WithEnv(map[string]string{
-			"APICURIO_STORAGE_KIND": "mem",
+			// Apicurio 3.x has no "mem" storage kind; sql over in-memory H2 is
+			// its ephemeral store. Set explicitly so a registry started for a
+			// test cannot quietly pick up persistent storage.
+			"APICURIO_STORAGE_KIND":     "sql",
+			"APICURIO_STORAGE_SQL_KIND": "h2",
 		}),
 		testcontainers.WithWaitStrategyAndDeadline(2*time.Minute,
 			wait.ForHTTP("/apis/registry/v3/system/info").WithPort("8080/tcp")),
