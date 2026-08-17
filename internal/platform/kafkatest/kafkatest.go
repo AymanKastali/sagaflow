@@ -99,6 +99,8 @@ func Start() (stop func(), err error) {
 				"while [ ! -f "+startGate+" ]; do sleep 0.1; done; "+
 				"export KAFKA_ADVERTISED_LISTENERS=\"$(cat "+startGate+")\"; "+
 				"exec /etc/kafka/docker/run"),
+		// The gate is published by rename, not by writing in place — see the
+		// comment on the Exec below.
 		// Wait only for the gate message here — Kafka has not booted yet.
 		testcontainers.WithWaitStrategyAndDeadline(2*time.Minute,
 			wait.ForLog("sagaflow: awaiting advertised listeners")),
@@ -124,8 +126,16 @@ func Start() (stop func(), err error) {
 
 	// Open the gate. The broker now boots advertising the host-mapped address —
 	// a value it never has to change afterwards.
+	//
+	// Written to a temporary path and renamed into place, because `> file`
+	// creates and truncates before printf writes anything. The waiting shell
+	// tests only for existence, so an in-place write leaves a window — narrow,
+	// but real — where it sees the file, cats it empty, and boots the broker with
+	// no advertised listener at all. rename(2) is atomic within a filesystem, so
+	// the gate either does not exist or holds the whole value.
 	code, out, err := ctr.Exec(ctx, []string{"/bin/sh", "-c", fmt.Sprintf(
-		"printf '%%s' 'PLAINTEXT://%s,BROKER://localhost:19092' > %s", broker, startGate)})
+		"printf '%%s' 'PLAINTEXT://%s,BROKER://localhost:19092' > %s.tmp && mv %s.tmp %s",
+		broker, startGate, startGate, startGate)})
 	if err != nil || code != 0 {
 		buf := make([]byte, 4096)
 		n, _ := out.Read(buf)
@@ -158,14 +168,17 @@ func waitForBroker(ctx context.Context, broker string, timeout time.Duration) er
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	var last error
+	// One client for the whole wait. franz-go retries metadata internally and a
+	// failed Ping leaves it usable, so rebuilding it each attempt would spawn and
+	// tear down goroutines hundreds of times to learn nothing extra.
+	cl, err := kgo.NewClient(kgo.SeedBrokers(broker))
+	if err != nil {
+		return fmt.Errorf("kafkatest: client for %s: %w", broker, err)
+	}
+	defer cl.Close()
+
 	for {
-		cl, err := kgo.NewClient(kgo.SeedBrokers(broker))
-		if err != nil {
-			return fmt.Errorf("kafkatest: client for %s: %w", broker, err)
-		}
-		last = cl.Ping(ctx)
-		cl.Close()
+		last := cl.Ping(ctx)
 		if last == nil {
 			return nil
 		}

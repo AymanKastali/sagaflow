@@ -148,12 +148,17 @@ down:
 generate:
 	go tool buf generate
 
+# go vet runs first and always. buf lint is skipped, loudly, until contracts
+# exist (Phase 3a) -- buf fails outright on a module with no .proto files, and a
+# lint target that cannot be run is a lint target nobody runs.
 lint:
-	go tool buf lint
 	go vet ./...
+	@if [ -f buf.yaml ]; then go tool buf lint; \
+	else echo "lint: skipping buf lint -- no buf.yaml yet (arrives in Phase 3a)"; fi
 
 breaking:
-	go tool buf breaking --against '.git#branch=main'
+	@if [ -f buf.yaml ]; then go tool buf breaking --against '.git#branch=main'; \
+	else echo "breaking: skipping -- no buf.yaml yet (arrives in Phase 3a)"; fi
 
 schemas-register:
 	go run ./cmd/schemactl -registry http://localhost:8080/apis/ccompat/v7
@@ -175,21 +180,64 @@ Create `internal/platform/version/version_test.go`:
 package version
 
 import (
+	"go/version"
 	"runtime"
-	"strings"
 	"testing"
 )
 
-func TestGoVersionIsAtLeast1_26_6(t *testing.T) {
+// Minimum is the toolchain floor spec §5 pins. It matches the `go` directive in
+// go.mod, which is what actually causes the toolchain to be fetched.
+const Minimum = "go1.26.6"
+
+// meetsFloor reports whether a Go release version is at least Minimum.
+//
+// go/version.Compare understands Go's release ordering, including that go1.26.10
+// is newer than go1.26.9 — which string comparison gets wrong.
+func meetsFloor(v string) bool {
+	return version.Compare(v, Minimum) >= 0
+}
+
+// TestToolchainMeetsTheFloor guards the pin for the build actually running.
+func TestToolchainMeetsTheFloor(t *testing.T) {
 	got := runtime.Version()
-	if !strings.HasPrefix(got, "go1.26.") {
-		t.Fatalf("built with %s, want go1.26.x — see Global Constraints", got)
+	if !version.IsValid(got) {
+		// Devel and gccgo builds report versions Compare cannot order; say so
+		// rather than failing on something this test cannot judge.
+		t.Skipf("runtime.Version() = %q is not a comparable release version", got)
 	}
-	if got == "go1.26.5" {
-		t.Fatalf("built with %s, want go1.26.6 or newer", got)
+	if !meetsFloor(got) {
+		t.Fatalf("built with %s, want %s or newer — see Global Constraints; "+
+			"GOTOOLCHAIN=auto should fetch it from the go.mod directive", got, Minimum)
+	}
+}
+
+// TestFloorRejectsOlderReleases proves the guard has teeth.
+//
+// Without this, TestToolchainMeetsTheFloor is a test whose only observed outcome
+// is "pass" — it would look identical if the comparison were inverted or the
+// floor were unreachable. This pins the rejection behaviour without needing an
+// older toolchain installed to demonstrate it.
+func TestFloorRejectsOlderReleases(t *testing.T) {
+	for _, tc := range []struct {
+		v    string
+		want bool
+	}{
+		{"go1.25.13", false}, // previous minor, however high its patch
+		{"go1.26.4", false},
+		{"go1.26.5", false}, // what was installed when this was written
+		{"go1.26.6", true},  // the floor itself
+		{"go1.26.7", true},
+		{"go1.26.10", true}, // string comparison would call this older than 1.26.6
+		{"go1.27.0", true},
+	} {
+		if got := meetsFloor(tc.v); got != tc.want {
+			t.Errorf("meetsFloor(%q) = %v, want %v", tc.v, got, tc.want)
+		}
 	}
 }
 ```
+
+A one-line "reject exactly go1.26.5" check would have been worse than nothing: it reads like a floor, passes on go1.26.4, and its only observable outcome is success. The table is what makes the guard falsifiable.
 
 - [ ] **Step 7: Run it**
 
@@ -371,8 +419,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 
@@ -465,23 +513,35 @@ func (p *PG) DSN(t *testing.T, dbName string) string {
 			t.Fatalf("connect admin: %v", err)
 		}
 		defer conn.Close(ctx)
-		if _, err := conn.Exec(ctx, fmt.Sprintf("CREATE DATABASE %q", dbName)); err != nil {
+		// CREATE DATABASE takes no parameters, so the name has to be
+		// interpolated. pgx.Identifier does the quoting and escaping; fmt's %q
+		// only looks right because Go and SQL happen to share the double quote.
+		stmt := "CREATE DATABASE " + pgx.Identifier{dbName}.Sanitize()
+		if _, err := conn.Exec(ctx, stmt); err != nil {
 			t.Fatalf("create database %s: %v", dbName, err)
 		}
 		p.created[dbName] = true
 	}
-	return replaceDBName(p.baseDSN, dbName)
+	dsn, err := replaceDBName(p.baseDSN, dbName)
+	if err != nil {
+		t.Fatalf("build dsn for %s: %v", dbName, err)
+	}
+	return dsn
 }
 
-// replaceDBName swaps the database out of a
-// postgres://user:pass@host:port/postgres?sslmode=disable DSN.
-func replaceDBName(dsn, dbName string) string {
-	base, query, hadQuery := strings.Cut(dsn, "?")
-	base = base[:strings.LastIndexByte(base, '/')+1] + dbName
-	if hadQuery {
-		return base + "?" + query
+// replaceDBName points a DSN at a different database, preserving everything else
+// including the query string.
+//
+// Parsed rather than sliced at the last '/': a password or host containing a
+// slash would send an index-based rewrite to the wrong place, and this helper's
+// output is what every integration test connects through.
+func replaceDBName(dsn, dbName string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "", fmt.Errorf("parse dsn: %w", err)
 	}
-	return base
+	u.Path = "/" + dbName
+	return u.String(), nil
 }
 ```
 
@@ -975,8 +1035,16 @@ func Start() (stop func(), err error) {
 
 	// Open the gate. The broker now boots advertising the host-mapped address —
 	// a value it never has to change afterwards.
+	//
+	// Written to a temporary path and renamed into place, because `> file`
+	// creates and truncates before printf writes anything. The waiting shell
+	// tests only for existence, so an in-place write leaves a window — narrow,
+	// but real — where it sees the file, cats it empty, and boots the broker with
+	// no advertised listener at all. rename(2) is atomic within a filesystem, so
+	// the gate either does not exist or holds the whole value.
 	code, out, err := ctr.Exec(ctx, []string{"/bin/sh", "-c", fmt.Sprintf(
-		"printf '%%s' 'PLAINTEXT://%s,BROKER://localhost:19092' > %s", broker, startGate)})
+		"printf '%%s' 'PLAINTEXT://%s,BROKER://localhost:19092' > %s.tmp && mv %s.tmp %s",
+		broker, startGate, startGate, startGate)}
 	if err != nil || code != 0 {
 		buf := make([]byte, 4096)
 		n, _ := out.Read(buf)
@@ -1009,14 +1077,17 @@ func waitForBroker(ctx context.Context, broker string, timeout time.Duration) er
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	var last error
+	// One client for the whole wait. franz-go retries metadata internally and a
+	// failed Ping leaves it usable, so rebuilding it each attempt would spawn and
+	// tear down goroutines hundreds of times to learn nothing extra.
+	cl, err := kgo.NewClient(kgo.SeedBrokers(broker))
+	if err != nil {
+		return fmt.Errorf("kafkatest: client for %s: %w", broker, err)
+	}
+	defer cl.Close()
+
 	for {
-		cl, err := kgo.NewClient(kgo.SeedBrokers(broker))
-		if err != nil {
-			return fmt.Errorf("kafkatest: client for %s: %w", broker, err)
-		}
-		last = cl.Ping(ctx)
-		cl.Close()
+		last := cl.Ping(ctx)
 		if last == nil {
 			return nil
 		}

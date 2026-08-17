@@ -14,8 +14,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 
@@ -108,21 +108,33 @@ func (p *PG) DSN(t *testing.T, dbName string) string {
 			t.Fatalf("connect admin: %v", err)
 		}
 		defer conn.Close(ctx)
-		if _, err := conn.Exec(ctx, fmt.Sprintf("CREATE DATABASE %q", dbName)); err != nil {
+		// CREATE DATABASE takes no parameters, so the name has to be
+		// interpolated. pgx.Identifier does the quoting and escaping; fmt's %q
+		// only looks right because Go and SQL happen to share the double quote.
+		stmt := "CREATE DATABASE " + pgx.Identifier{dbName}.Sanitize()
+		if _, err := conn.Exec(ctx, stmt); err != nil {
 			t.Fatalf("create database %s: %v", dbName, err)
 		}
 		p.created[dbName] = true
 	}
-	return replaceDBName(p.baseDSN, dbName)
+	dsn, err := replaceDBName(p.baseDSN, dbName)
+	if err != nil {
+		t.Fatalf("build dsn for %s: %v", dbName, err)
+	}
+	return dsn
 }
 
-// replaceDBName swaps the database out of a
-// postgres://user:pass@host:port/postgres?sslmode=disable DSN.
-func replaceDBName(dsn, dbName string) string {
-	base, query, hadQuery := strings.Cut(dsn, "?")
-	base = base[:strings.LastIndexByte(base, '/')+1] + dbName
-	if hadQuery {
-		return base + "?" + query
+// replaceDBName points a DSN at a different database, preserving everything else
+// including the query string.
+//
+// Parsed rather than sliced at the last '/': a password or host containing a
+// slash would send an index-based rewrite to the wrong place, and this helper's
+// output is what every integration test connects through.
+func replaceDBName(dsn, dbName string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "", fmt.Errorf("parse dsn: %w", err)
 	}
-	return base
+	u.Path = "/" + dbName
+	return u.String(), nil
 }
