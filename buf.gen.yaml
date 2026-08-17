@@ -1,0 +1,10 @@
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/kptac/sagaflow/internal/platform/contracts
+plugins:
+  - local: ["go", "tool", "protoc-gen-go"]
+    out: internal/platform/contracts
+    opt: paths=source_relative

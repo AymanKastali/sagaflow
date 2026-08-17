@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package sagaflow.inventory.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// HoldSeat asks inventory to hold a seat. hold_id is supplied by the caller and
+// is deterministic, so a redelivered command produces the same hold rather than
+// a second one.
+message HoldSeat {
+  string hold_id = 1;
+  string booking_id = 2;
+  string seat_id = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}

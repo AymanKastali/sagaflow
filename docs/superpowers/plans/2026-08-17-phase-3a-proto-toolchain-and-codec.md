@@ -152,36 +152,52 @@ grep -m1 'package ' internal/platform/contracts/sagaflow/inventory/v1/events.pb.
 
 Expected: `commands.pb.go` and `events.pb.go`, and package `inventoryv1`.
 
-- [ ] **Step 7: Prove the full names match the spec's `ce_type` values**
+- [ ] **Step 7: Pin the full names with a test, not a throwaway script**
 
-Create a temporary check and run it:
+A scratch `main.go` under `/tmp` cannot do this: it sits outside the module, so Go's `internal/` visibility rule rejects the import with *"use of internal package … not allowed"*. Write a real test instead — these names deserve a permanent guard rather than a one-off check.
 
-```bash
-cat > /tmp/fullname_check.go <<'EOF'
-package main
+Create `internal/platform/contracts/sagaflow/inventory/v1/fullname_test.go`:
+
+```go
+package inventoryv1_test
 
 import (
-	"fmt"
+	"testing"
 
 	inventoryv1 "github.com/kptac/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
+	"google.golang.org/protobuf/proto"
 )
 
-func main() {
-	fmt.Println((&inventoryv1.SeatHeld{}).ProtoReflect().Descriptor().FullName())
-	fmt.Println((&inventoryv1.HoldSeat{}).ProtoReflect().Descriptor().FullName())
+// TestFullNamesMatchTheSpec pins the fully qualified message names.
+//
+// These strings are load-bearing in three places at once (spec §8.1): the
+// ce_type header on the wire, the events.type column in Postgres, and the
+// protoregistry lookup key that turns a stored row back into a message. Editing
+// a .proto file's `package` line would change all three silently — generated
+// code would still compile, the codec would still round-trip in a single
+// process, and only cross-service delivery and replay of already-stored events
+// would break. So the names are asserted here rather than trusted.
+func TestFullNamesMatchTheSpec(t *testing.T) {
+	for _, tc := range []struct {
+		msg  proto.Message
+		want string
+	}{
+		{&inventoryv1.SeatHeld{}, "sagaflow.inventory.v1.SeatHeld"},
+		{&inventoryv1.HoldSeat{}, "sagaflow.inventory.v1.HoldSeat"},
+	} {
+		got := string(tc.msg.ProtoReflect().Descriptor().FullName())
+		if got != tc.want {
+			t.Errorf("full name = %q, want %q — the proto package line is wrong, "+
+				"and every later phase inherits the error", got, tc.want)
+		}
+	}
 }
-EOF
-go run /tmp/fullname_check.go && rm /tmp/fullname_check.go
 ```
 
-Expected exactly:
+Run: `go test ./internal/platform/contracts/... -v`
+Expected: PASS, in milliseconds, with no container.
 
-```
-sagaflow.inventory.v1.SeatHeld
-sagaflow.inventory.v1.HoldSeat
-```
-
-These strings become the `ce_type` header and the `events.type` column. If they differ, the proto `package` is wrong and every later phase inherits the error.
+This is a hand-written test living beside generated code, which does not violate "never hand-edit the generated files" — it is a separate `_test.go`. Each future contract package should carry the same guard for its own names.
 
 - [ ] **Step 8: Commit**
 
