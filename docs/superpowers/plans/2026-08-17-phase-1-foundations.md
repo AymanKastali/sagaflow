@@ -117,6 +117,14 @@ If the `go` directive reads anything other than `go 1.26.6`, fix it with `go mod
 
 **Do not run `go mod tidy` until Phase 4b is complete.** Nothing imports the eleven libraries yet, so `go get` records them all as `// indirect` and `tidy` would delete every one of them — undoing this task. The versions are still reproducible in the meantime: they are recorded in `go.mod` and hashed in `go.sum`, so module resolution selects them regardless of the `indirect` marker, and each becomes a direct requirement as the phase that needs it lands. The two `tool` entries are unaffected — the `tool` directive is itself the thing that keeps them.
 
+The same cause produces one recurring symptom, so expect it rather than debugging it each time: the first task to import a *sub-package* may fail with `missing go.sum entry for module providing package …`. `go get` at module granularity only records sums for what the build graph needed at the time, and a sub-package can pull a transitive module the root did not — `pgx/v5/pgxpool` needs `jackc/puddle/v2`, for instance. Fix it by naming the sub-package at its pinned version, never by tidying:
+
+```bash
+go get github.com/jackc/pgx/v5/pgxpool@v5.10.0
+```
+
+That adds the missing sums and leaves the selected versions untouched, which `go list -m` will confirm.
+
 - [ ] **Step 4: Write `.gitignore`**
 
 ```gitignore
