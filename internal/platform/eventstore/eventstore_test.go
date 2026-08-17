@@ -2,6 +2,7 @@ package eventstore_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -221,5 +222,110 @@ func TestAppendEmptySliceIsANoOp(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("want 0 events, got %d", n)
+	}
+}
+
+func TestLoadReturnsEventsInVersionOrder(t *testing.T) {
+	ctx := context.Background()
+	pool := newDB(t, "load_order")
+
+	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		return eventstore.Append(ctx, tx, "seat-14A", 0,
+			[]eventstore.Event{ev("A"), ev("B")})
+	}); err != nil {
+		t.Fatalf("append 1: %v", err)
+	}
+	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		return eventstore.Append(ctx, tx, "seat-14A", 2, []eventstore.Event{ev("C")})
+	}); err != nil {
+		t.Fatalf("append 2: %v", err)
+	}
+
+	var got []eventstore.Recorded
+	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		var err error
+		got, err = eventstore.Load(ctx, tx, "seat-14A")
+		return err
+	}); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if len(got) != 3 {
+		t.Fatalf("want 3 events, got %d", len(got))
+	}
+	for i, want := range []string{"A", "B", "C"} {
+		if got[i].Type != want {
+			t.Fatalf("event %d: want type %s, got %s", i, want, got[i].Type)
+		}
+		if got[i].Version != i+1 {
+			t.Fatalf("event %d: want version %d, got %d", i, i+1, got[i].Version)
+		}
+	}
+	if got[0].Meta.TraceID != "trace-1" {
+		t.Fatalf("meta did not round-trip: %+v", got[0].Meta)
+	}
+	// Semantic comparison, not byte comparison. JSONB is not a byte-preserving
+	// store: Postgres reparses and re-serialises, so {"k":"v"} comes back as
+	// {"k": "v"} and key order is not promised either. Spec §8.4 forbids
+	// comparing protojson byte-wise for precisely this reason — it is why the
+	// stored form must never be hashed or used as a cache key.
+	var data map[string]string
+	if err := json.Unmarshal(got[0].Data, &data); err != nil {
+		t.Fatalf("stored data is not valid JSON: %s: %v", got[0].Data, err)
+	}
+	if data["k"] != "v" {
+		t.Fatalf("data did not round-trip: %s", got[0].Data)
+	}
+	if got[0].RecordedAt.IsZero() {
+		t.Fatal("recorded_at was not populated")
+	}
+}
+
+func TestLoadUnknownStreamIsEmptyNotError(t *testing.T) {
+	ctx := context.Background()
+	pool := newDB(t, "load_missing")
+
+	var got []eventstore.Recorded
+	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		var err error
+		got, err = eventstore.Load(ctx, tx, "seat-nobody-held")
+		return err
+	}); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("want 0 events for unknown stream, got %d", len(got))
+	}
+}
+
+func TestLoadIsolatesStreams(t *testing.T) {
+	ctx := context.Background()
+	pool := newDB(t, "load_isolation")
+
+	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		if err := eventstore.Append(ctx, tx, "seat-14A", 0, []eventstore.Event{ev("A")}); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("append 14A: %v", err)
+	}
+	// A second stream at the same version — legal, and must not bleed across.
+	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		return eventstore.Append(ctx, tx, "seat-14B", 0, []eventstore.Event{ev("B")})
+	}); err != nil {
+		t.Fatalf("append 14B: %v", err)
+	}
+
+	var got []eventstore.Recorded
+	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		var err error
+		got, err = eventstore.Load(ctx, tx, "seat-14B")
+		return err
+	}); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(got) != 1 || got[0].Type != "B" {
+		t.Fatalf("want only seat-14B's single event, got %+v", got)
 	}
 }

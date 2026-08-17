@@ -389,7 +389,7 @@ func TestAppendEmptySliceIsANoOp(t *testing.T) {
 }
 ```
 
-Add these imports to the test file's import block: `errors`, `fmt`, `sync`, `github.com/jackc/pgx/v5`, `github.com/kptac/sagaflow/internal/platform/eventstore`.
+Add these imports to the test file's import block: `encoding/json`, `errors`, `fmt`, `sync`, `github.com/jackc/pgx/v5`, `github.com/kptac/sagaflow/internal/platform/eventstore`.
 
 An empty append must be a no-op rather than an error because a pure `Decide` returning no events is the normal, expected outcome for a duplicate or late message — spec §10.5 relies on it.
 
@@ -579,7 +579,16 @@ func TestLoadReturnsEventsInVersionOrder(t *testing.T) {
 	if got[0].Meta.TraceID != "trace-1" {
 		t.Fatalf("meta did not round-trip: %+v", got[0].Meta)
 	}
-	if string(got[0].Data) != `{"k":"v"}` {
+	// Semantic comparison, not byte comparison. JSONB is not a byte-preserving
+	// store: Postgres reparses and re-serialises, so {"k":"v"} comes back as
+	// {"k": "v"} and key order is not promised either. Spec §8.4 forbids
+	// comparing protojson byte-wise for precisely this reason — it is why the
+	// stored form must never be hashed or used as a cache key.
+	var data map[string]string
+	if err := json.Unmarshal(got[0].Data, &data); err != nil {
+		t.Fatalf("stored data is not valid JSON: %s: %v", got[0].Data, err)
+	}
+	if data["k"] != "v" {
 		t.Fatalf("data did not round-trip: %s", got[0].Data)
 	}
 	if got[0].RecordedAt.IsZero() {

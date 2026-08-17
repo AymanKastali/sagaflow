@@ -89,3 +89,42 @@ func Append(ctx context.Context, tx pgx.Tx, streamID string, expectedVersion int
 	}
 	return nil
 }
+
+const loadSQL = `
+SELECT global_seq, version, type, data, meta, recorded_at
+FROM events
+WHERE stream_id = $1
+ORDER BY version`
+
+// Load reads a stream in version order.
+//
+// It reads inside the caller's transaction, so the version of the last event
+// returned is a safe expectedVersion for a subsequent Append in that same
+// transaction — nothing can interleave.
+func Load(ctx context.Context, tx pgx.Tx, streamID string) ([]Recorded, error) {
+	rows, err := tx.Query(ctx, loadSQL, streamID)
+	if err != nil {
+		return nil, fmt.Errorf("eventstore: load %s: %w", streamID, err)
+	}
+	defer rows.Close()
+
+	var out []Recorded
+	for rows.Next() {
+		var (
+			r        Recorded
+			metaJSON []byte
+		)
+		if err := rows.Scan(&r.GlobalSeq, &r.Version, &r.Type, &r.Data, &metaJSON, &r.RecordedAt); err != nil {
+			return nil, fmt.Errorf("eventstore: scan %s: %w", streamID, err)
+		}
+		if err := json.Unmarshal(metaJSON, &r.Meta); err != nil {
+			return nil, fmt.Errorf("eventstore: unmarshal meta for %s v%d: %w", streamID, r.Version, err)
+		}
+		r.StreamID = streamID
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("eventstore: iterate %s: %w", streamID, err)
+	}
+	return out, nil
+}
