@@ -4,28 +4,41 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/kptac/sagaflow/internal/platform/kafka"
 	"github.com/kptac/sagaflow/internal/platform/kafkatest"
-	"github.com/kptac/sagaflow/internal/platform/outbox"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-func produce(t *testing.T, brokers []string, topic, key string, headers map[string]string, payload []byte) {
+// produce writes one record and reports where it landed.
+//
+// It returns the partition and offset because the broker is shared by every test in
+// the package and by repeated runs (-count=2), so no test may assume it is writing
+// to an empty topic. Callers that only need the record ignore both.
+//
+// A kgo client rather than kafka.Producer: only ProduceSync's result carries the
+// assigned offset, and Publish deliberately reports nothing but an error. The
+// header mapping Publish does is covered by TestPublishPreservesKeyHeadersAndPayload.
+func produce(t *testing.T, brokers []string, topic, key string, headers map[string]string, payload []byte) (partition int32, offset int64) {
 	t.Helper()
-	p, err := kafka.NewProducer(brokers)
+	cl, err := kgo.NewClient(kgo.SeedBrokers(brokers...), kgo.RequiredAcks(kgo.AllISRAcks()))
 	if err != nil {
-		t.Fatalf("producer: %v", err)
+		t.Fatalf("produce client: %v", err)
 	}
-	defer p.Close()
-	if err := p.Publish(t.Context(), []outbox.Claimed{{
-		ID:      1,
-		Message: outbox.Message{Topic: topic, Key: key, Payload: payload, Headers: headers},
-	}}); err != nil {
-		t.Fatalf("publish: %v", err)
+	defer cl.Close()
+
+	rec := &kgo.Record{Topic: topic, Key: []byte(key), Value: payload}
+	for k, v := range headers {
+		rec.Headers = append(rec.Headers, kgo.RecordHeader{Key: k, Value: []byte(v)})
 	}
+	res, err := cl.ProduceSync(t.Context(), rec).First()
+	if err != nil {
+		t.Fatalf("produce to %s: %v", topic, err)
+	}
+	return res.Partition, res.Offset
 }
 
 // run starts c in the background and stops it when the test ends.
@@ -35,9 +48,14 @@ func run(t *testing.T, ctx context.Context, c *kafka.Consumer) {
 	go func() { _ = c.Run(ctx) }()
 }
 
-// dlqRecords polls topic for want records. A DLQ assertion that polled once would
-// pass a broker that had not yet appended the record, so this blocks on ctx.
-func dlqRecords(t *testing.T, ctx context.Context, brokers []string, topic string, want int) []*kgo.Record {
+// dlqRecord polls topic until the dead-lettered copy of sourceOffset appears.
+//
+// It selects by provenance rather than taking the topic's first record, because a
+// DLQ topic outlives the test that filled it: the whole package shares one broker,
+// and -count=2 replays every test against it, so "the first record" is somebody
+// else's. Blocking on ctx rather than polling once also means a broker that has not
+// appended the record yet fails as a timeout, not as a missing record.
+func dlqRecord(t *testing.T, ctx context.Context, brokers []string, topic string, sourceOffset int64) *kgo.Record {
 	t.Helper()
 	cl, err := kgo.NewClient(kgo.SeedBrokers(brokers...), kgo.ConsumeTopics(topic))
 	if err != nil {
@@ -45,15 +63,21 @@ func dlqRecords(t *testing.T, ctx context.Context, brokers []string, topic strin
 	}
 	defer cl.Close()
 
-	var recs []*kgo.Record
-	for len(recs) < want {
-		fetches := cl.PollRecords(ctx, want-len(recs))
+	want := strconv.FormatInt(sourceOffset, 10)
+	for {
+		fetches := cl.PollRecords(ctx, 16)
 		if err := fetches.Err0(); err != nil {
 			t.Fatalf("poll %s: %v", topic, err)
 		}
-		recs = append(recs, fetches.Records()...)
+		for _, r := range fetches.Records() {
+			if headersOfRecord(r)["sagaflow_dlq_offset"] == want {
+				return r
+			}
+		}
+		if ctx.Err() != nil {
+			t.Fatalf("no dead letter for offset %d on %s", sourceOffset, topic)
+		}
 	}
-	return recs
 }
 
 func headersOfRecord(r *kgo.Record) map[string]string {
@@ -72,7 +96,7 @@ func TestConsumerDeliversRecordWithHeadersAndProvenance(t *testing.T) {
 	if err := kafka.EnsureTopics(ctx, brokers, kafka.Partitions, 1, topic); err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
-	produce(t, brokers, topic, "seat-14A",
+	wantPartition, wantOffset := produce(t, brokers, topic, "seat-14A",
 		map[string]string{"ce_id": "ce-1", "ce_source": "/sagaflow/inventory"}, []byte{7})
 
 	got := make(chan kafka.Record, 1)
@@ -101,8 +125,12 @@ func TestConsumerDeliversRecordWithHeadersAndProvenance(t *testing.T) {
 		if r.Topic != topic {
 			t.Errorf("topic: got %q", r.Topic)
 		}
-		if r.Offset != 0 {
-			t.Errorf("offset: got %d", r.Offset)
+		// Provenance has to match where the record actually landed: it is what the
+		// DLQ carries, and a replay aimed at the wrong partition or offset is worse
+		// than no replay at all.
+		if r.Partition != wantPartition || r.Offset != wantOffset {
+			t.Errorf("provenance: want %d/%d, got %d/%d",
+				wantPartition, wantOffset, r.Partition, r.Offset)
 		}
 	case <-ctx.Done():
 		t.Fatal("handler never ran")
@@ -197,8 +225,8 @@ func TestFailedRecordIsSettledBeforeTheNextInItsPartition(t *testing.T) {
 		t.Fatalf("ensure: %v", err)
 	}
 
-	// One key ⇒ one partition ⇒ offsets 0 and 1, delivered in that order.
-	produce(t, brokers, topic, "seat-14A", map[string]string{"ce_id": "ce-1"}, []byte{1})
+	// One key ⇒ one partition ⇒ consecutive offsets, delivered in that order.
+	_, failingOffset := produce(t, brokers, topic, "seat-14A", map[string]string{"ce_id": "ce-1"}, []byte{1})
 	produce(t, brokers, topic, "seat-14A", map[string]string{"ce_id": "ce-2"}, []byte{2})
 
 	dlq, err := kafka.NewProducer(brokers)
@@ -244,9 +272,9 @@ func TestFailedRecordIsSettledBeforeTheNextInItsPartition(t *testing.T) {
 	}
 
 	// The first record exhausted its budget, so it is in the DLQ rather than lost.
-	recs := dlqRecords(t, ctx, brokers, topic+".dlq", 1)
-	if recs[0].Value[0] != 1 {
-		t.Fatalf("wrong record dead-lettered: %v", recs[0].Value)
+	dead := dlqRecord(t, ctx, brokers, topic+".dlq", failingOffset)
+	if dead.Value[0] != 1 {
+		t.Fatalf("wrong record dead-lettered: %v", dead.Value)
 	}
 }
 
@@ -268,7 +296,7 @@ func TestUnsettleableRecordBlocksLaterOffsetsInItsPartition(t *testing.T) {
 		t.Fatalf("ensure: %v", err)
 	}
 
-	// One key ⇒ one partition ⇒ the failure sits at offset 0, the success at 1.
+	// One key ⇒ one partition ⇒ the failure sits immediately before the success.
 	produce(t, brokers, topic, "seat-14A", map[string]string{"ce_id": "ce-1"}, []byte{1})
 	produce(t, brokers, topic, "seat-14A", map[string]string{"ce_id": "ce-2"}, []byte{2})
 
@@ -330,7 +358,7 @@ func TestUnsettleableRecordBlocksLaterOffsetsInItsPartition(t *testing.T) {
 		case v := <-seen:
 			redelivered[v] = true
 		case <-ctx.Done():
-			t.Fatalf("only %v came back — the group advanced past the unsettled record at offset 0", redelivered)
+			t.Fatalf("only %v came back — the group advanced past the unsettled record", redelivered)
 		}
 	}
 }
@@ -486,7 +514,7 @@ func TestPermanentErrorRoutesToDLQWithProvenance(t *testing.T) {
 	if err := kafka.EnsureTopics(ctx, brokers, kafka.Partitions, 1, topic, topic+".dlq"); err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
-	produce(t, brokers, topic, "seat-14A",
+	_, wantOffset := produce(t, brokers, topic, "seat-14A",
 		map[string]string{"ce_id": "ce-1", "traceparent": "00-aaaa-bbbb-01"}, []byte{9})
 
 	dlqProducer, err := kafka.NewProducer(brokers)
@@ -509,8 +537,8 @@ func TestPermanentErrorRoutesToDLQWithProvenance(t *testing.T) {
 	}
 	run(t, ctx, c)
 
-	recs := dlqRecords(t, ctx, brokers, topic+".dlq", 1)
-	h := headersOfRecord(recs[0])
+	dead := dlqRecord(t, ctx, brokers, topic+".dlq", wantOffset)
+	h := headersOfRecord(dead)
 
 	if h["ce_id"] != "ce-1" {
 		t.Errorf("original headers must survive: %v", h)
@@ -521,13 +549,13 @@ func TestPermanentErrorRoutesToDLQWithProvenance(t *testing.T) {
 	if h["sagaflow_dlq_topic"] != topic {
 		t.Errorf("want provenance topic %q, got %q", topic, h["sagaflow_dlq_topic"])
 	}
-	if h["sagaflow_dlq_offset"] != "0" {
-		t.Errorf("want provenance offset 0, got %q", h["sagaflow_dlq_offset"])
+	if got := h["sagaflow_dlq_offset"]; got != strconv.FormatInt(wantOffset, 10) {
+		t.Errorf("want provenance offset %d, got %q", wantOffset, got)
 	}
 	if h["sagaflow_dlq_error"] == "" {
 		t.Error("want the error recorded so an operator need not re-run it")
 	}
-	if string(recs[0].Key) != "seat-14A" {
-		t.Errorf("dlq must preserve the original key for replay: %q", recs[0].Key)
+	if string(dead.Key) != "seat-14A" {
+		t.Errorf("dlq must preserve the original key for replay: %q", dead.Key)
 	}
 }
