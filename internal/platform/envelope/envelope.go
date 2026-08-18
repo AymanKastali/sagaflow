@@ -1,9 +1,3 @@
-// Package envelope maps CloudEvents v1.0.2 attributes to and from Kafka
-// headers in binary content mode, per the CNCF Kafka protocol binding.
-//
-// The binding puts attributes in headers prefixed "ce_" and leaves the payload
-// as the message body. traceparent is a W3C header, not a CloudEvents
-// attribute, so it is deliberately unprefixed.
 package envelope
 
 import (
@@ -21,16 +15,18 @@ const (
 	ContentType = "application/protobuf"
 )
 
-// ErrMissingAttribute means a required CloudEvents attribute was absent. It is a
-// permanent technical failure: the message can never become valid, so it
-// dead-letters without retrying (spec §10.2).
+// ErrMissingAttribute means a required CloudEvents attribute was absent. A
+// message missing a required attribute can never become valid no matter how
+// many times it is redelivered, so this is a permanent failure: it dead-letters
+// immediately instead of being retried.
 var ErrMissingAttribute = errors.New("envelope: missing required attribute")
 
 // Envelope is the identity of one message.
 //
 // ID and Source together are specified by CloudEvents to be unique, which is
 // exactly the property idempotent consumption needs — so that pair becomes the
-// inbox deduplication key rather than something we define (spec §8.1).
+// inbox deduplication key rather than something this system has to define and
+// defend on its own.
 type Envelope struct {
 	ID            string // ce_id — UUIDv7, generated at outbox enqueue time
 	Source        string // ce_source — e.g. /sagaflow/inventory
