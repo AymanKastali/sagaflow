@@ -8,8 +8,8 @@ import (
 	"github.com/AymanKastali/sagaflow/internal/testsupport/kafkatest"
 )
 
-// One broker for the whole package (spec §12.4). Isolation comes from topic names
-// and consumer groups derived from the test, not from a container per test.
+// One broker for the whole package. Isolation comes from topic names and
+// consumer groups derived from the test, not from a container per test.
 //
 // This package needs no registry: framing against one is platform/schema's job,
 // and these tests only produce and consume bytes.

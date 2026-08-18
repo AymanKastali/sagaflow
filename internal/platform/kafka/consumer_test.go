@@ -178,7 +178,8 @@ func TestFailingHandlerDoesNotCommitTheOffset(t *testing.T) {
 	runCtx, stop := context.WithCancel(ctx)
 	go func() { _ = failing.Run(runCtx) }()
 
-	// Wait on a signal rather than spinning on a counter (spec §12.4).
+	// Wait on a signal rather than spinning on a counter, so the test has no
+	// flaky dependency on how fast the consumer happens to retry.
 	select {
 	case <-attempted:
 	case <-ctx.Done():
