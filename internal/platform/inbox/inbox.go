@@ -1,11 +1,3 @@
-// Package inbox turns Kafka's at-least-once delivery into exactly-once
-// application.
-//
-// The contract is narrow and load-bearing: MarkConsumed must be the first
-// statement in the handler's transaction, and that transaction must be the same
-// one that writes the state change. Split across two transactions, the outcome is
-// either double-apply or silently dropped work depending on commit order — and
-// which one you get depends on timing, so testing will not reliably reveal it.
 package inbox
 
 import (
