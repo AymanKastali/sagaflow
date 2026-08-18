@@ -1,4 +1,6 @@
-package version
+// Package toolchain guards the Go version the build actually runs on. It holds
+// only a test because a guard has nothing to export.
+package toolchain
 
 import (
 	"go/version"

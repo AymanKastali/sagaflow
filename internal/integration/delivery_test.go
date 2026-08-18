@@ -1,11 +1,12 @@
-// Package platform_test holds the cross-package deliverable for spec §13 phase 4:
-// an event committed in one service's transaction reaching another service's
-// handler, applied exactly once.
+// Package integration holds cross-package deliverables — tests that exercise
+// several platform packages together rather than any one of them.
 //
-// It lives here rather than in a service package because the services are phases
-// 5–8. Two databases in one container, never one database with two schemas: no
-// transaction can span them, which is the property being demonstrated.
-package platform_test
+// The first is spec §13 phase 4: an event committed in one service's transaction
+// reaching another service's handler, applied exactly once. It lives here rather
+// than in a service package because the services are phases 5–8. Two databases in
+// one container, never one database with two schemas: no transaction can span
+// them, which is the property being demonstrated.
+package integration_test
 
 import (
 	"context"
