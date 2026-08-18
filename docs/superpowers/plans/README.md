@@ -28,7 +28,17 @@ moment a service is written, and there are none yet.
 
 ## Plan set 2 — the domain (spec §13 phases 5–8)
 
-Not yet written. Inventory seat streams and TTL timers; hotel and payment with the provider stub and idempotency keys; the saga's `Decide` and compensation matrix; the booking API and its projection. Write these only after plan set 1 is complete, so the plans argue from machinery that exists.
+| # | Plan | Ends when | Depends on |
+|---|---|---|---|
+| 8 | [Phase 5a — Seat streams and holds](2026-08-18-phase-5a-seat-streams-and-holds.md) | Two concurrent holds on one seat produce one `SeatHeld` and one `SeatUnavailable` | 7 |
+
+Still to write: phase 5b (the seat-hold TTL timer and the availability projection), phase 6 (hotel and payment, with the provider stub and idempotency keys), phase 7 (the saga's `Decide` and the compensation matrix), phase 8 (the booking API and its projection).
+
+Three decisions taken while writing 5a, recorded here because later plans inherit them:
+
+- **The timer scheduler is `platform/timers/`, not `platform/saga/`.** Spec §7's tree puts it inside `saga/`, but `inventory` needs the seat-hold TTL and must not import `platform/saga` — that is the `kafka→outbox` edge the restructure removed. `platform/saga` will use `platform/timers` for step timeouts. Arrives in 5b, with the matching §7 amendment.
+- **Phase 5's "one 409" is the domain refusal, not HTTP.** HTTP arrives in phase 8; what it renders as a 409 is a `SeatUnavailable` reply, and that is what 5a asserts.
+- **The §7.2 handler transaction stays written out in each service for now.** Extracting a shared helper from one consumer is guessing; phase 6 gives it the second and third, which is when the shape is known rather than predicted.
 
 ## Plan set 3 — observability and end-to-end (spec §13 phases 9–10)
 

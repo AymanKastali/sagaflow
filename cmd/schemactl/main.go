@@ -29,8 +29,11 @@ type binding struct {
 }
 
 var bindings = []binding{
-	{"inventory.events", "proto/sagaflow/inventory/v1/events.proto", &inventoryv1.SeatHeld{}},
-	{"inventory.commands", "proto/sagaflow/inventory/v1/commands.proto", &inventoryv1.HoldSeat{}},
+	{"inventory.commands", "proto/sagaflow/inventory/v1/hold_seat.proto", &inventoryv1.HoldSeat{}},
+	{"inventory.commands", "proto/sagaflow/inventory/v1/release_seat_hold.proto", &inventoryv1.ReleaseSeatHold{}},
+	{"inventory.events", "proto/sagaflow/inventory/v1/seat_held.proto", &inventoryv1.SeatHeld{}},
+	{"inventory.events", "proto/sagaflow/inventory/v1/seat_hold_released.proto", &inventoryv1.SeatHoldReleased{}},
+	{"inventory.events", "proto/sagaflow/inventory/v1/seat_unavailable.proto", &inventoryv1.SeatUnavailable{}},
 }
 
 func main() {

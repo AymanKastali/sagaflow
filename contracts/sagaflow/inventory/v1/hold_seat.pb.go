@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        (unknown)
-// source: sagaflow/inventory/v1/commands.proto
+// source: sagaflow/inventory/v1/hold_seat.proto
 
 package inventoryv1
 
@@ -37,7 +37,7 @@ type HoldSeat struct {
 
 func (x *HoldSeat) Reset() {
 	*x = HoldSeat{}
-	mi := &file_sagaflow_inventory_v1_commands_proto_msgTypes[0]
+	mi := &file_sagaflow_inventory_v1_hold_seat_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -49,7 +49,7 @@ func (x *HoldSeat) String() string {
 func (*HoldSeat) ProtoMessage() {}
 
 func (x *HoldSeat) ProtoReflect() protoreflect.Message {
-	mi := &file_sagaflow_inventory_v1_commands_proto_msgTypes[0]
+	mi := &file_sagaflow_inventory_v1_hold_seat_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -62,7 +62,7 @@ func (x *HoldSeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HoldSeat.ProtoReflect.Descriptor instead.
 func (*HoldSeat) Descriptor() ([]byte, []int) {
-	return file_sagaflow_inventory_v1_commands_proto_rawDescGZIP(), []int{0}
+	return file_sagaflow_inventory_v1_hold_seat_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *HoldSeat) GetHoldId() string {
@@ -93,11 +93,11 @@ func (x *HoldSeat) GetExpiresAt() *timestamppb.Timestamp {
 	return nil
 }
 
-var File_sagaflow_inventory_v1_commands_proto protoreflect.FileDescriptor
+var File_sagaflow_inventory_v1_hold_seat_proto protoreflect.FileDescriptor
 
-const file_sagaflow_inventory_v1_commands_proto_rawDesc = "" +
+const file_sagaflow_inventory_v1_hold_seat_proto_rawDesc = "" +
 	"\n" +
-	"$sagaflow/inventory/v1/commands.proto\x12\x15sagaflow.inventory.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x96\x01\n" +
+	"%sagaflow/inventory/v1/hold_seat.proto\x12\x15sagaflow.inventory.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x96\x01\n" +
 	"\bHoldSeat\x12\x17\n" +
 	"\ahold_id\x18\x01 \x01(\tR\x06holdId\x12\x1d\n" +
 	"\n" +
@@ -105,26 +105,26 @@ const file_sagaflow_inventory_v1_commands_proto_rawDesc = "" +
 	"\aseat_id\x18\x03 \x01(\tR\x06seatId\x129\n" +
 	"\n" +
 	"expires_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAtB\xe7\x01\n" +
-	"\x19com.sagaflow.inventory.v1B\rCommandsProtoP\x01ZEgithub.com/kptac/sagaflow/contracts/sagaflow/inventory/v1;inventoryv1\xa2\x02\x03SIX\xaa\x02\x15Sagaflow.Inventory.V1\xca\x02\x15Sagaflow\\Inventory\\V1\xe2\x02!Sagaflow\\Inventory\\V1\\GPBMetadata\xea\x02\x17Sagaflow::Inventory::V1b\x06proto3"
+	"\x19com.sagaflow.inventory.v1B\rHoldSeatProtoP\x01ZEgithub.com/kptac/sagaflow/contracts/sagaflow/inventory/v1;inventoryv1\xa2\x02\x03SIX\xaa\x02\x15Sagaflow.Inventory.V1\xca\x02\x15Sagaflow\\Inventory\\V1\xe2\x02!Sagaflow\\Inventory\\V1\\GPBMetadata\xea\x02\x17Sagaflow::Inventory::V1b\x06proto3"
 
 var (
-	file_sagaflow_inventory_v1_commands_proto_rawDescOnce sync.Once
-	file_sagaflow_inventory_v1_commands_proto_rawDescData []byte
+	file_sagaflow_inventory_v1_hold_seat_proto_rawDescOnce sync.Once
+	file_sagaflow_inventory_v1_hold_seat_proto_rawDescData []byte
 )
 
-func file_sagaflow_inventory_v1_commands_proto_rawDescGZIP() []byte {
-	file_sagaflow_inventory_v1_commands_proto_rawDescOnce.Do(func() {
-		file_sagaflow_inventory_v1_commands_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_sagaflow_inventory_v1_commands_proto_rawDesc), len(file_sagaflow_inventory_v1_commands_proto_rawDesc)))
+func file_sagaflow_inventory_v1_hold_seat_proto_rawDescGZIP() []byte {
+	file_sagaflow_inventory_v1_hold_seat_proto_rawDescOnce.Do(func() {
+		file_sagaflow_inventory_v1_hold_seat_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_sagaflow_inventory_v1_hold_seat_proto_rawDesc), len(file_sagaflow_inventory_v1_hold_seat_proto_rawDesc)))
 	})
-	return file_sagaflow_inventory_v1_commands_proto_rawDescData
+	return file_sagaflow_inventory_v1_hold_seat_proto_rawDescData
 }
 
-var file_sagaflow_inventory_v1_commands_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
-var file_sagaflow_inventory_v1_commands_proto_goTypes = []any{
+var file_sagaflow_inventory_v1_hold_seat_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_sagaflow_inventory_v1_hold_seat_proto_goTypes = []any{
 	(*HoldSeat)(nil),              // 0: sagaflow.inventory.v1.HoldSeat
 	(*timestamppb.Timestamp)(nil), // 1: google.protobuf.Timestamp
 }
-var file_sagaflow_inventory_v1_commands_proto_depIdxs = []int32{
+var file_sagaflow_inventory_v1_hold_seat_proto_depIdxs = []int32{
 	1, // 0: sagaflow.inventory.v1.HoldSeat.expires_at:type_name -> google.protobuf.Timestamp
 	1, // [1:1] is the sub-list for method output_type
 	1, // [1:1] is the sub-list for method input_type
@@ -133,26 +133,26 @@ var file_sagaflow_inventory_v1_commands_proto_depIdxs = []int32{
 	0, // [0:1] is the sub-list for field type_name
 }
 
-func init() { file_sagaflow_inventory_v1_commands_proto_init() }
-func file_sagaflow_inventory_v1_commands_proto_init() {
-	if File_sagaflow_inventory_v1_commands_proto != nil {
+func init() { file_sagaflow_inventory_v1_hold_seat_proto_init() }
+func file_sagaflow_inventory_v1_hold_seat_proto_init() {
+	if File_sagaflow_inventory_v1_hold_seat_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sagaflow_inventory_v1_commands_proto_rawDesc), len(file_sagaflow_inventory_v1_commands_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sagaflow_inventory_v1_hold_seat_proto_rawDesc), len(file_sagaflow_inventory_v1_hold_seat_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   1,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_sagaflow_inventory_v1_commands_proto_goTypes,
-		DependencyIndexes: file_sagaflow_inventory_v1_commands_proto_depIdxs,
-		MessageInfos:      file_sagaflow_inventory_v1_commands_proto_msgTypes,
+		GoTypes:           file_sagaflow_inventory_v1_hold_seat_proto_goTypes,
+		DependencyIndexes: file_sagaflow_inventory_v1_hold_seat_proto_depIdxs,
+		MessageInfos:      file_sagaflow_inventory_v1_hold_seat_proto_msgTypes,
 	}.Build()
-	File_sagaflow_inventory_v1_commands_proto = out.File
-	file_sagaflow_inventory_v1_commands_proto_goTypes = nil
-	file_sagaflow_inventory_v1_commands_proto_depIdxs = nil
+	File_sagaflow_inventory_v1_hold_seat_proto = out.File
+	file_sagaflow_inventory_v1_hold_seat_proto_goTypes = nil
+	file_sagaflow_inventory_v1_hold_seat_proto_depIdxs = nil
 }
