@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AymanKastali/sagaflow/internal/inventory"
+	"github.com/AymanKastali/sagaflow/internal/platform/envelope"
+	"github.com/AymanKastali/sagaflow/internal/platform/eventstore"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/kptac/sagaflow/internal/inventory"
-	"github.com/kptac/sagaflow/internal/platform/envelope"
-	"github.com/kptac/sagaflow/internal/platform/eventstore"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )

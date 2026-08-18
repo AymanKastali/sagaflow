@@ -4,13 +4,13 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/AymanKastali/sagaflow/internal/inventory"
+	"github.com/AymanKastali/sagaflow/internal/inventory/migrations"
+	"github.com/AymanKastali/sagaflow/internal/platform/eventstore"
+	"github.com/AymanKastali/sagaflow/internal/platform/pg"
+	"github.com/AymanKastali/sagaflow/internal/testsupport/pgtest"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/kptac/sagaflow/internal/inventory"
-	"github.com/kptac/sagaflow/internal/inventory/migrations"
-	"github.com/kptac/sagaflow/internal/platform/eventstore"
-	"github.com/kptac/sagaflow/internal/platform/pg"
-	"github.com/kptac/sagaflow/internal/testsupport/pgtest"
 	"google.golang.org/protobuf/proto"
 )
 

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kptac/sagaflow/internal/platform/kafka"
-	"github.com/kptac/sagaflow/internal/testsupport/kafkatest"
+	"github.com/AymanKastali/sagaflow/internal/platform/kafka"
+	"github.com/AymanKastali/sagaflow/internal/testsupport/kafkatest"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 

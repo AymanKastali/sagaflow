@@ -102,8 +102,8 @@ const file_sagaflow_inventory_v1_release_seat_hold_proto_rawDesc = "" +
 	"\n" +
 	"booking_id\x18\x02 \x01(\tR\tbookingId\x12\x17\n" +
 	"\aseat_id\x18\x03 \x01(\tR\x06seatId\x12\x16\n" +
-	"\x06reason\x18\x04 \x01(\tR\x06reasonB\xee\x01\n" +
-	"\x19com.sagaflow.inventory.v1B\x14ReleaseSeatHoldProtoP\x01ZEgithub.com/kptac/sagaflow/contracts/sagaflow/inventory/v1;inventoryv1\xa2\x02\x03SIX\xaa\x02\x15Sagaflow.Inventory.V1\xca\x02\x15Sagaflow\\Inventory\\V1\xe2\x02!Sagaflow\\Inventory\\V1\\GPBMetadata\xea\x02\x17Sagaflow::Inventory::V1b\x06proto3"
+	"\x06reason\x18\x04 \x01(\tR\x06reasonB\xf5\x01\n" +
+	"\x19com.sagaflow.inventory.v1B\x14ReleaseSeatHoldProtoP\x01ZLgithub.com/AymanKastali/sagaflow/contracts/sagaflow/inventory/v1;inventoryv1\xa2\x02\x03SIX\xaa\x02\x15Sagaflow.Inventory.V1\xca\x02\x15Sagaflow\\Inventory\\V1\xe2\x02!Sagaflow\\Inventory\\V1\\GPBMetadata\xea\x02\x17Sagaflow::Inventory::V1b\x06proto3"
 
 var (
 	file_sagaflow_inventory_v1_release_seat_hold_proto_rawDescOnce sync.Once

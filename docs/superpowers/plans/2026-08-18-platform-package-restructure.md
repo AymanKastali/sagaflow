@@ -127,7 +127,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/kptac/sagaflow/internal/platform/envelope"
+	"github.com/AymanKastali/sagaflow/internal/platform/envelope"
 )
 ```
 
@@ -182,7 +182,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kptac/sagaflow/internal/platform/envelope"
+	"github.com/AymanKastali/sagaflow/internal/platform/envelope"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
@@ -345,10 +345,10 @@ Lines 275–283:
 - [ ] **Step 12: Verify the wrong edge is gone**
 
 ```bash
-go build ./... && go list -f '{{join .Imports "\n"}}' github.com/kptac/sagaflow/internal/platform/kafka | grep sagaflow
+go build ./... && go list -f '{{join .Imports "\n"}}' github.com/AymanKastali/sagaflow/internal/platform/kafka | grep sagaflow
 ```
 
-Expected: exactly one line, `github.com/kptac/sagaflow/internal/platform/envelope`. If `.../outbox` appears, a production file still imports it.
+Expected: exactly one line, `github.com/AymanKastali/sagaflow/internal/platform/envelope`. If `.../outbox` appears, a production file still imports it.
 
 - [ ] **Step 13: Run the full suite**
 
@@ -475,7 +475,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/kptac/sagaflow/internal/platform/kafkatest"
+	"github.com/AymanKastali/sagaflow/internal/platform/kafkatest"
 )
 
 // One broker for the whole package (spec §12.4). Isolation comes from topic names
@@ -553,7 +553,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `platform/schema` from Task 2, since `serde_test.go` now lives there and imports `srtest`.
-- Produces: import paths `github.com/kptac/sagaflow/internal/testsupport/{pgtest,kafkatest,srtest}`. Package names and every exported symbol are unchanged.
+- Produces: import paths `github.com/AymanKastali/sagaflow/internal/testsupport/{pgtest,kafkatest,srtest}`. Package names and every exported symbol are unchanged.
 
 - [ ] **Step 1: Move the directories**
 
@@ -690,7 +690,7 @@ Nothing else in the file changes. `Minimum`, `meetsFloor`, and both tests keep t
 - [ ] **Step 5: Confirm platform is no longer a package**
 
 ```bash
-go list ./... | grep -x 'github.com/kptac/sagaflow/internal/platform'
+go list ./... | grep -x 'github.com/AymanKastali/sagaflow/internal/platform'
 ```
 
 Expected: no output, and a non-zero exit from grep. `internal/platform` is now a directory only.
@@ -744,7 +744,7 @@ Generated contracts sit four levels below `internal/`, under a directory named f
 
 **Interfaces:**
 - Consumes: `internal/platform/schema` from Task 2, `internal/integration` from Task 4 — both appear in the import-rewrite list.
-- Produces: import path `github.com/kptac/sagaflow/contracts/sagaflow/inventory/v1`, conventionally aliased `inventoryv1`. Exported types `SeatHeld` and `HoldSeat` are unchanged, as are their fully qualified proto names.
+- Produces: import path `github.com/AymanKastali/sagaflow/contracts/sagaflow/inventory/v1`, conventionally aliased `inventoryv1`. Exported types `SeatHeld` and `HoldSeat` are unchanged, as are their fully qualified proto names.
 
 - [ ] **Step 1: Move the generated tree**
 
@@ -759,7 +759,7 @@ This leaves `contracts/sagaflow/inventory/v1/*.go` — the layout buf will regen
 Create `contracts/go.mod`:
 
 ```
-module github.com/kptac/sagaflow/contracts
+module github.com/AymanKastali/sagaflow/contracts
 
 go 1.26.6
 
@@ -771,11 +771,11 @@ The generated code imports only `protoreflect`, `protoimpl`, and `timestamppb`, 
 - [ ] **Step 3: Wire the root module to it**
 
 ```bash
-go mod edit -require=github.com/kptac/sagaflow/contracts@v0.0.0
-go mod edit -replace=github.com/kptac/sagaflow/contracts=./contracts
+go mod edit -require=github.com/AymanKastali/sagaflow/contracts@v0.0.0
+go mod edit -replace=github.com/AymanKastali/sagaflow/contracts=./contracts
 ```
 
-The `replace` is what makes local development work without a `go.work`. It is ignored by anyone importing `github.com/kptac/sagaflow` from outside, which is correct — they should depend on a tagged `contracts/vX.Y.Z` instead.
+The `replace` is what makes local development work without a `go.work`. It is ignored by anyone importing `github.com/AymanKastali/sagaflow` from outside, which is correct — they should depend on a tagged `contracts/vX.Y.Z` instead.
 
 - [ ] **Step 4: Rewrite the import paths**
 
@@ -797,7 +797,7 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/kptac/sagaflow/contracts
+      value: github.com/AymanKastali/sagaflow/contracts
 plugins:
   - local: ["go", "tool", "protoc-gen-go"]
     out: contracts
@@ -912,7 +912,7 @@ In `docs/superpowers/specs/2026-08-17-sagaflow-design.md`, replace the `internal
 
 ```
 ├── contracts/                      # generated protobuf — its own module, public
-│   ├── go.mod                      # github.com/kptac/sagaflow/contracts
+│   ├── go.mod                      # github.com/AymanKastali/sagaflow/contracts
 │   └── sagaflow/<service>/v1/
 ├── cmd/
 │   ├── booking/main.go             # ~20 lines: config, wire.New, Run

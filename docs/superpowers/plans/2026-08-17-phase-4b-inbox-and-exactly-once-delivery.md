@@ -18,7 +18,7 @@
 
 Copied verbatim from spec §5 and §3. Every task's requirements implicitly include this section.
 
-- **Go 1.26.6.** Module path `github.com/kptac/sagaflow`. **Add no dependency not listed in spec §5.**
+- **Go 1.26.6.** Module path `github.com/AymanKastali/sagaflow`. **Add no dependency not listed in spec §5.**
 - **Marked offsets, committed only after the handler's transaction** (spec D13/§10.2). franz-go's default autocommit commits every *polled* offset on a timer, including records not yet processed, so a rebalance or crash mid-batch advances the group past work that never happened. This design absorbs duplicates and cannot absorb loss.
 - **`AutoCommitMarks()` + `BlockRebalanceOnPoll()`**, `MarkCommitRecords` after commit, `CommitMarkedOffsets` in `OnPartitionsRevoked` (spec §10.2). With `BlockRebalanceOnPoll` the loop **must** call `AllowRebalance()` after each poll is processed, or the group never rebalances.
 - **A record is settled — succeeded or dead-lettered — before the consumer touches the next record in its partition** (spec D13/§10.2). `MarkCommitRecords` keeps the highest marked offset per partition and its documentation says it "does not allow rewinds", so marking a later offset while an earlier one sits unmarked commits the group past the earlier record and destroys its work silently.
@@ -110,10 +110,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	migrations "github.com/kptac/sagaflow/internal/inventory/migrations"
-	"github.com/kptac/sagaflow/internal/platform/inbox"
-	"github.com/kptac/sagaflow/internal/platform/pg"
-	"github.com/kptac/sagaflow/internal/platform/pgtest"
+	migrations "github.com/AymanKastali/sagaflow/internal/inventory/migrations"
+	"github.com/AymanKastali/sagaflow/internal/platform/inbox"
+	"github.com/AymanKastali/sagaflow/internal/platform/pg"
+	"github.com/AymanKastali/sagaflow/internal/platform/pgtest"
 )
 
 // One container for the package (spec §12.4).
@@ -400,7 +400,7 @@ func TestMain(m *testing.M) {
 }
 ```
 
-Add `"github.com/kptac/sagaflow/internal/platform/kafkatest"` to that file's imports.
+Add `"github.com/AymanKastali/sagaflow/internal/platform/kafkatest"` to that file's imports.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -413,9 +413,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kptac/sagaflow/internal/platform/kafka"
-	"github.com/kptac/sagaflow/internal/platform/kafkatest"
-	"github.com/kptac/sagaflow/internal/platform/outbox"
+	"github.com/AymanKastali/sagaflow/internal/platform/kafka"
+	"github.com/AymanKastali/sagaflow/internal/platform/kafkatest"
+	"github.com/AymanKastali/sagaflow/internal/platform/outbox"
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
@@ -632,7 +632,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kptac/sagaflow/internal/platform/outbox"
+	"github.com/AymanKastali/sagaflow/internal/platform/outbox"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
@@ -743,9 +743,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kptac/sagaflow/internal/platform/kafka"
-	"github.com/kptac/sagaflow/internal/platform/kafkatest"
-	"github.com/kptac/sagaflow/internal/platform/outbox"
+	"github.com/AymanKastali/sagaflow/internal/platform/kafka"
+	"github.com/AymanKastali/sagaflow/internal/platform/kafkatest"
+	"github.com/AymanKastali/sagaflow/internal/platform/outbox"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
@@ -1107,7 +1107,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/kptac/sagaflow/internal/platform/outbox"
+	"github.com/AymanKastali/sagaflow/internal/platform/outbox"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
@@ -1398,18 +1398,18 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	bookingmigrations "github.com/kptac/sagaflow/internal/booking/migrations"
-	inventorymigrations "github.com/kptac/sagaflow/internal/inventory/migrations"
-	inventoryv1 "github.com/kptac/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
-	"github.com/kptac/sagaflow/internal/platform/codec"
-	"github.com/kptac/sagaflow/internal/platform/envelope"
-	"github.com/kptac/sagaflow/internal/platform/eventstore"
-	"github.com/kptac/sagaflow/internal/platform/inbox"
-	"github.com/kptac/sagaflow/internal/platform/kafka"
-	"github.com/kptac/sagaflow/internal/platform/kafkatest"
-	"github.com/kptac/sagaflow/internal/platform/outbox"
-	"github.com/kptac/sagaflow/internal/platform/pg"
-	"github.com/kptac/sagaflow/internal/platform/pgtest"
+	bookingmigrations "github.com/AymanKastali/sagaflow/internal/booking/migrations"
+	inventorymigrations "github.com/AymanKastali/sagaflow/internal/inventory/migrations"
+	inventoryv1 "github.com/AymanKastali/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
+	"github.com/AymanKastali/sagaflow/internal/platform/codec"
+	"github.com/AymanKastali/sagaflow/internal/platform/envelope"
+	"github.com/AymanKastali/sagaflow/internal/platform/eventstore"
+	"github.com/AymanKastali/sagaflow/internal/platform/inbox"
+	"github.com/AymanKastali/sagaflow/internal/platform/kafka"
+	"github.com/AymanKastali/sagaflow/internal/platform/kafkatest"
+	"github.com/AymanKastali/sagaflow/internal/platform/outbox"
+	"github.com/AymanKastali/sagaflow/internal/platform/pg"
+	"github.com/AymanKastali/sagaflow/internal/platform/pgtest"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

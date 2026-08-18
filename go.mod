@@ -1,4 +1,4 @@
-module github.com/kptac/sagaflow
+module github.com/AymanKastali/sagaflow
 
 go 1.26.6
 
@@ -33,6 +33,7 @@ require (
 	connectrpc.com/connect v1.20.0 // indirect
 	connectrpc.com/otelconnect v0.9.0 // indirect
 	dario.cat/mergo v1.0.2 // indirect
+	github.com/AymanKastali/sagaflow/contracts v0.0.0
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver/v3 v3.5.0 // indirect
@@ -73,7 +74,6 @@ require (
 	github.com/jdx/go-netrc v1.0.0 // indirect
 	github.com/klauspost/compress v1.19.0 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
-	github.com/kptac/sagaflow/contracts v0.0.0
 	github.com/lufia/plan9stats v0.0.0-20260330125221-c963978e514e // indirect
 	github.com/magiconair/properties v1.8.10 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
@@ -149,4 +149,4 @@ tool (
 	google.golang.org/protobuf/cmd/protoc-gen-go
 )
 
-replace github.com/kptac/sagaflow/contracts => ./contracts
+replace github.com/AymanKastali/sagaflow/contracts => ./contracts

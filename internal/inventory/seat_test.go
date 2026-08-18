@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	inventoryv1 "github.com/kptac/sagaflow/contracts/sagaflow/inventory/v1"
-	"github.com/kptac/sagaflow/internal/inventory"
+	inventoryv1 "github.com/AymanKastali/sagaflow/contracts/sagaflow/inventory/v1"
+	"github.com/AymanKastali/sagaflow/internal/inventory"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

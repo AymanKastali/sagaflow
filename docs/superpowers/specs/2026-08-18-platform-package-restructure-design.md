@@ -110,7 +110,7 @@ packages less truthful, not more.
 sagaflow/
 ├── proto/sagaflow/inventory/v1/*.proto
 ├── contracts/                        # separate Go module, public
-│   ├── go.mod                        # github.com/kptac/sagaflow/contracts
+│   ├── go.mod                        # github.com/AymanKastali/sagaflow/contracts
 │   └── … generated *.pb.go
 ├── cmd/schemactl/
 └── internal/
@@ -200,8 +200,8 @@ A public `contracts/` inside the service module still forces every consumer to i
 and testcontainers. A separate module is what makes "public" mean anything.
 
 ```
-require github.com/kptac/sagaflow/contracts v0.0.0
-replace github.com/kptac/sagaflow/contracts => ./contracts
+require github.com/AymanKastali/sagaflow/contracts v0.0.0
+replace github.com/AymanKastali/sagaflow/contracts => ./contracts
 ```
 
 No `go.work`. The cost is honest and small: `go test ./...` at the root no longer reaches the nested
@@ -213,7 +213,7 @@ afterwards it guards a published API.
 **Open mechanical detail.** Proto package `sagaflow.inventory.v1` plus buf's `PACKAGE_DIRECTORY_MATCH`
 pins the source path, and `paths=source_relative` mirrors it into the output, giving
 `contracts/sagaflow/inventory/v1` and the stuttering import
-`github.com/kptac/sagaflow/contracts/sagaflow/inventory/v1`. The intent is to remove the stutter with an
+`github.com/AymanKastali/sagaflow/contracts/sagaflow/inventory/v1`. The intent is to remove the stutter with an
 explicit `go_package` override in buf managed mode. If that fights managed mode, the stutter is
 accepted and recorded — proto packages are not renamed to avoid it, per §2.
 

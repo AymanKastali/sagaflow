@@ -18,7 +18,7 @@
 
 Copied verbatim from spec §5 and §3. Every task's requirements implicitly include this section.
 
-- **Go 1.26.6.** Module path `github.com/kptac/sagaflow`. **Add no dependency not listed in spec §5.**
+- **Go 1.26.6.** Module path `github.com/AymanKastali/sagaflow`. **Add no dependency not listed in spec §5.**
 - **One transaction writes exactly one stream** (spec §7.2), plus its outbox rows and its inbox row. Never two streams.
 - **`global_seq` is diagnostic only** (spec §6.4). No component may read events by a monotonic local cursor — `BIGSERIAL` values are assigned at insert but become visible at commit, so transaction A can take 41 and commit after B takes 42. A consumer tracking `WHERE global_seq > cursor` reads 42, advances, and never sees 41. It loses events silently, only under concurrency, so it passes every test written on a quiet machine.
 - **The outbox guarantees at-least-once, never exactly-once** (spec §10.1). A crash between produce and mark republishes. This is why the inbox exists, and it must not be "fixed" here.
@@ -110,11 +110,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	migrations "github.com/kptac/sagaflow/internal/inventory/migrations"
-	"github.com/kptac/sagaflow/internal/platform/eventstore"
-	"github.com/kptac/sagaflow/internal/platform/outbox"
-	"github.com/kptac/sagaflow/internal/platform/pg"
-	"github.com/kptac/sagaflow/internal/platform/pgtest"
+	migrations "github.com/AymanKastali/sagaflow/internal/inventory/migrations"
+	"github.com/AymanKastali/sagaflow/internal/platform/eventstore"
+	"github.com/AymanKastali/sagaflow/internal/platform/outbox"
+	"github.com/AymanKastali/sagaflow/internal/platform/pg"
+	"github.com/AymanKastali/sagaflow/internal/platform/pgtest"
 )
 
 // One container for the package (spec §12.4). Note this makes the advisory-lock

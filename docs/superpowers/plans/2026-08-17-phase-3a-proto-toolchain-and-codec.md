@@ -19,7 +19,7 @@
 Copied verbatim from spec §5 and §3. Every task's requirements implicitly include this section.
 
 - **Go 1.26.6.** `go.mod` declares `go 1.26.6`.
-- **Module path:** `github.com/kptac/sagaflow`. One module at the repository root.
+- **Module path:** `github.com/AymanKastali/sagaflow`. One module at the repository root.
 - **Pinned tools:** `buf` 1.72.0 and `protoc-gen-go` v1.36.12, both resolved through `go tool`, never a system install.
 - **Add no dependency not listed in spec §5.**
 - **Events are persisted forever** (spec §8.2): never reuse a field number, never repurpose a field, always `reserved` on removal. Adding a field is backward compatible; anything else needs a new message (`SeatHeldV2`) plus an upcaster.
@@ -55,7 +55,7 @@ Generated code is committed rather than gitignored: it makes `go build` work on 
 
 **Interfaces:**
 - Consumes: the pinned `go tool buf` and `go tool protoc-gen-go` from Phase 1.
-- Produces: Go package `inventoryv1` at import path `github.com/kptac/sagaflow/internal/platform/contracts/sagaflow/inventory/v1`, containing `*SeatHeld` and `*HoldSeat`, whose full names are `sagaflow.inventory.v1.SeatHeld` and `sagaflow.inventory.v1.HoldSeat`.
+- Produces: Go package `inventoryv1` at import path `github.com/AymanKastali/sagaflow/internal/platform/contracts/sagaflow/inventory/v1`, containing `*SeatHeld` and `*HoldSeat`, whose full names are `sagaflow.inventory.v1.SeatHeld` and `sagaflow.inventory.v1.HoldSeat`.
 
 Only two messages, and neither carries domain logic. Seat holds, rooms, payments and the saga are phases 5–8; this task needs exactly enough contract surface to prove the toolchain and the codec.
 
@@ -83,7 +83,7 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/kptac/sagaflow/internal/platform/contracts
+      value: github.com/AymanKastali/sagaflow/internal/platform/contracts
 plugins:
   - local: ["go", "tool", "protoc-gen-go"]
     out: internal/platform/contracts
@@ -164,7 +164,7 @@ package inventoryv1_test
 import (
 	"testing"
 
-	inventoryv1 "github.com/kptac/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
+	inventoryv1 "github.com/AymanKastali/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -234,9 +234,9 @@ import (
 	"testing"
 	"time"
 
-	inventoryv1 "github.com/kptac/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
-	"github.com/kptac/sagaflow/internal/platform/codec"
-	"github.com/kptac/sagaflow/internal/platform/eventstore"
+	inventoryv1 "github.com/AymanKastali/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
+	"github.com/AymanKastali/sagaflow/internal/platform/codec"
+	"github.com/AymanKastali/sagaflow/internal/platform/eventstore"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -346,7 +346,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/kptac/sagaflow/internal/platform/eventstore"
+	"github.com/AymanKastali/sagaflow/internal/platform/eventstore"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -467,7 +467,7 @@ func TestRoundTripThroughPostgres(t *testing.T) {
 }
 ```
 
-Add these imports to the test file: `context`, `fmt`, `os`, `github.com/jackc/pgx/v5`, `github.com/kptac/sagaflow/internal/platform/pg`, `github.com/kptac/sagaflow/internal/platform/pgtest`, and `migrations "github.com/kptac/sagaflow/internal/inventory/migrations"`.
+Add these imports to the test file: `context`, `fmt`, `os`, `github.com/jackc/pgx/v5`, `github.com/AymanKastali/sagaflow/internal/platform/pg`, `github.com/AymanKastali/sagaflow/internal/platform/pgtest`, and `migrations "github.com/AymanKastali/sagaflow/internal/inventory/migrations"`.
 
 Add the package's `TestMain` too — one container for the package, per spec §12.4. The five tests above need no infrastructure and `pgtest.Start` is a no-op under `-short`, so this costs them nothing:
 
