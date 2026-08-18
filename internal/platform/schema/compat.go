@@ -1,4 +1,4 @@
-package kafka
+package schema
 
 import (
 	"context"
@@ -25,7 +25,7 @@ import (
 func EnsureBackwardCompatibility(ctx context.Context, cl *sr.Client) error {
 	// With no subjects passed, both calls address the global config.
 	if _, err := globalLevel(cl.SetCompatibility(ctx, sr.SetCompatibility{Level: sr.CompatBackward})); err != nil {
-		return fmt.Errorf("kafka: set global BACKWARD compatibility: %w", err)
+		return fmt.Errorf("schema: set global BACKWARD compatibility: %w", err)
 	}
 
 	// Read the level back rather than trusting what SetCompatibility reported: it
@@ -38,10 +38,10 @@ func EnsureBackwardCompatibility(ctx context.Context, cl *sr.Client) error {
 	// report failure while enforcement was in fact active.
 	level, err := globalLevel(cl.Compatibility(ctx))
 	if err != nil {
-		return fmt.Errorf("kafka: read back global compatibility: %w", err)
+		return fmt.Errorf("schema: read back global compatibility: %w", err)
 	}
 	if level != sr.CompatBackward {
-		return fmt.Errorf("kafka: global compatibility is %s, want BACKWARD", level)
+		return fmt.Errorf("schema: global compatibility is %s, want BACKWARD", level)
 	}
 	return nil
 }

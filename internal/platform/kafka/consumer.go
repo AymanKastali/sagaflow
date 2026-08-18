@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/kptac/sagaflow/internal/platform/outbox"
+	"github.com/kptac/sagaflow/internal/platform/envelope"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
@@ -288,12 +288,10 @@ func (c *Consumer) deadLetter(ctx context.Context, r Record, cause error) error 
 	headers["sagaflow_dlq_offset"] = strconv.FormatInt(r.Offset, 10)
 	headers["sagaflow_dlq_error"] = cause.Error()
 
-	return c.cfg.DLQ.Publish(ctx, []outbox.Claimed{{
-		Message: outbox.Message{
-			Topic:   r.Topic + ".dlq",
-			Key:     r.Key, // same key so a replay lands on the same partition
-			Payload: r.Value,
-			Headers: headers,
-		},
+	return c.cfg.DLQ.Publish(ctx, []envelope.Message{{
+		Topic:   r.Topic + ".dlq",
+		Key:     r.Key, // same key so a replay lands on the same partition
+		Payload: r.Value,
+		Headers: headers,
 	}})
 }

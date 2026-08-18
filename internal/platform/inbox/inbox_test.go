@@ -12,7 +12,7 @@ import (
 	migrations "github.com/kptac/sagaflow/internal/inventory/migrations"
 	"github.com/kptac/sagaflow/internal/platform/inbox"
 	"github.com/kptac/sagaflow/internal/platform/pg"
-	"github.com/kptac/sagaflow/internal/platform/pgtest"
+	"github.com/kptac/sagaflow/internal/testsupport/pgtest"
 )
 
 // One container for the package (spec §12.4).

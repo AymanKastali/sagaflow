@@ -14,10 +14,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	migrations "github.com/kptac/sagaflow/internal/inventory/migrations"
+	"github.com/kptac/sagaflow/internal/platform/envelope"
 	"github.com/kptac/sagaflow/internal/platform/eventstore"
 	"github.com/kptac/sagaflow/internal/platform/outbox"
 	"github.com/kptac/sagaflow/internal/platform/pg"
-	"github.com/kptac/sagaflow/internal/platform/pgtest"
+	"github.com/kptac/sagaflow/internal/testsupport/pgtest"
 )
 
 // One container for the package (spec §12.4). Note this makes the advisory-lock
@@ -39,8 +40,8 @@ func newDB(t *testing.T, name string) *pgxpool.Pool {
 	return pgtest.Shared(t).Migrated(t, name, migrations.FS)
 }
 
-func msg(topic, key string) outbox.Message {
-	return outbox.Message{
+func msg(topic, key string) envelope.Message {
+	return envelope.Message{
 		Topic:   topic,
 		Key:     key,
 		Payload: []byte{0x00, 0x01, 0x02},
@@ -71,7 +72,7 @@ func TestEnqueueCommitsWithTheHandler(t *testing.T) {
 		}); err != nil {
 			return err
 		}
-		return outbox.Enqueue(ctx, tx, []outbox.Message{msg("inventory.events", "seat-14A")})
+		return outbox.Enqueue(ctx, tx, []envelope.Message{msg("inventory.events", "seat-14A")})
 	})
 	if err != nil {
 		t.Fatalf("handler: %v", err)
@@ -98,7 +99,7 @@ func TestEnqueueRollsBackWithTheHandler(t *testing.T) {
 		}); err != nil {
 			return err
 		}
-		if err := outbox.Enqueue(ctx, tx, []outbox.Message{msg("inventory.events", "seat-14A")}); err != nil {
+		if err := outbox.Enqueue(ctx, tx, []envelope.Message{msg("inventory.events", "seat-14A")}); err != nil {
 			return err
 		}
 		return sentinel
@@ -124,7 +125,7 @@ func TestEnqueuePreservesOrderAndHeaders(t *testing.T) {
 	pool := newDB(t, "outbox_order")
 
 	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
-		return outbox.Enqueue(ctx, tx, []outbox.Message{
+		return outbox.Enqueue(ctx, tx, []envelope.Message{
 			msg("inventory.events", "seat-14A"),
 			msg("inventory.events", "seat-14B"),
 			msg("inventory.commands", "seat-14C"),
@@ -199,15 +200,15 @@ func TestEnqueueRejectsIncompleteMessages(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		msg  outbox.Message
+		msg  envelope.Message
 	}{
-		{"no topic", outbox.Message{Key: "seat-14A", Payload: []byte{1}}},
-		{"no key", outbox.Message{Topic: "inventory.events", Payload: []byte{1}}},
-		{"no payload", outbox.Message{Topic: "inventory.events", Key: "seat-14A"}},
+		{"no topic", envelope.Message{Key: "seat-14A", Payload: []byte{1}}},
+		{"no key", envelope.Message{Topic: "inventory.events", Payload: []byte{1}}},
+		{"no payload", envelope.Message{Topic: "inventory.events", Key: "seat-14A"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
-				return outbox.Enqueue(ctx, tx, []outbox.Message{tc.msg})
+				return outbox.Enqueue(ctx, tx, []envelope.Message{tc.msg})
 			})
 			if err == nil {
 				t.Fatalf("want an error for a message with %s, got nil", tc.name)
@@ -221,16 +222,16 @@ func TestEnqueueRejectsIncompleteMessages(t *testing.T) {
 
 type fakePublisher struct {
 	mu   sync.Mutex
-	got  [][]outbox.Claimed
+	got  [][]envelope.Message
 	err  error
 	call int
 	// published, when set, receives each batch. Tests that drive Run block on it
 	// instead of sleeping: spec §12.4 wants completion to be a signal with a
 	// context deadline as the failure mode, not a guess at a duration.
-	published chan []outbox.Claimed
+	published chan []envelope.Message
 }
 
-func (f *fakePublisher) Publish(_ context.Context, msgs []outbox.Claimed) error {
+func (f *fakePublisher) Publish(_ context.Context, msgs []envelope.Message) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.call++
@@ -262,7 +263,7 @@ func (f *fakePublisher) keys() []string {
 func enqueue(t *testing.T, pool *pgxpool.Pool, keys ...string) {
 	t.Helper()
 	ctx := t.Context()
-	msgs := make([]outbox.Message, len(keys))
+	msgs := make([]envelope.Message, len(keys))
 	for i, k := range keys {
 		msgs[i] = msg("inventory.events", k)
 	}
@@ -463,7 +464,7 @@ func TestClaimByFlagSurvivesAnOutOfOrderCommit(t *testing.T) {
 		t.Fatalf("begin A: %v", err)
 	}
 	defer func() { _ = txA.Rollback(ctx) }()
-	if err := outbox.Enqueue(ctx, txA, []outbox.Message{msg("inventory.events", "lower-id")}); err != nil {
+	if err := outbox.Enqueue(ctx, txA, []envelope.Message{msg("inventory.events", "lower-id")}); err != nil {
 		t.Fatalf("enqueue A: %v", err)
 	}
 
@@ -472,7 +473,7 @@ func TestClaimByFlagSurvivesAnOutOfOrderCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin B: %v", err)
 	}
-	if err := outbox.Enqueue(ctx, txB, []outbox.Message{msg("inventory.events", "higher-id")}); err != nil {
+	if err := outbox.Enqueue(ctx, txB, []envelope.Message{msg("inventory.events", "higher-id")}); err != nil {
 		t.Fatalf("enqueue B: %v", err)
 	}
 	if err := txB.Commit(ctx); err != nil {
@@ -578,7 +579,7 @@ func TestRunPublishesAndShutsDownCleanly(t *testing.T) {
 	defer cancel()
 	pool := newDB(t, "poller_run")
 
-	pub := &fakePublisher{published: make(chan []outbox.Claimed, 4)}
+	pub := &fakePublisher{published: make(chan []envelope.Message, 4)}
 	runDone := make(chan error, 1)
 	go func() { runDone <- outbox.NewPoller(pool, pub).Run(ctx) }()
 
@@ -635,7 +636,7 @@ func TestNotifyIsWithheldUntilCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := outbox.Enqueue(ctx, tx, []outbox.Message{msg("inventory.events", "rolled-back")}); err != nil {
+	if err := outbox.Enqueue(ctx, tx, []envelope.Message{msg("inventory.events", "rolled-back")}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	if err := tx.Rollback(ctx); err != nil {

@@ -104,8 +104,8 @@ const file_sagaflow_inventory_v1_events_proto_rawDesc = "" +
 	"booking_id\x18\x02 \x01(\tR\tbookingId\x12\x17\n" +
 	"\aseat_id\x18\x03 \x01(\tR\x06seatId\x129\n" +
 	"\n" +
-	"expires_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAtB\xf7\x01\n" +
-	"\x19com.sagaflow.inventory.v1B\vEventsProtoP\x01ZWgithub.com/kptac/sagaflow/internal/platform/contracts/sagaflow/inventory/v1;inventoryv1\xa2\x02\x03SIX\xaa\x02\x15Sagaflow.Inventory.V1\xca\x02\x15Sagaflow\\Inventory\\V1\xe2\x02!Sagaflow\\Inventory\\V1\\GPBMetadata\xea\x02\x17Sagaflow::Inventory::V1b\x06proto3"
+	"expires_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAtB\xe5\x01\n" +
+	"\x19com.sagaflow.inventory.v1B\vEventsProtoP\x01ZEgithub.com/kptac/sagaflow/contracts/sagaflow/inventory/v1;inventoryv1\xa2\x02\x03SIX\xaa\x02\x15Sagaflow.Inventory.V1\xca\x02\x15Sagaflow\\Inventory\\V1\xe2\x02!Sagaflow\\Inventory\\V1\\GPBMetadata\xea\x02\x17Sagaflow::Inventory::V1b\x06proto3"
 
 var (
 	file_sagaflow_inventory_v1_events_proto_rawDescOnce sync.Once

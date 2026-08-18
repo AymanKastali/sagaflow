@@ -4,12 +4,18 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/kptac/sagaflow/internal/platform/envelope"
 	"github.com/kptac/sagaflow/internal/platform/kafka"
-	"github.com/kptac/sagaflow/internal/platform/kafkatest"
 	"github.com/kptac/sagaflow/internal/platform/outbox"
+	"github.com/kptac/sagaflow/internal/testsupport/kafkatest"
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
+
+// Producer must satisfy the interface the outbox poller consumes. The assertion
+// lives here because kafka does not import outbox in production — a test import
+// does not appear in the production dependency graph.
+var _ outbox.Publisher = (*kafka.Producer)(nil)
 
 // headersOf flattens a record's headers for comparison against a map literal.
 func headersOf(r *kgo.Record) map[string]string {
@@ -70,14 +76,11 @@ func TestPublishPreservesKeyHeadersAndPayload(t *testing.T) {
 		"ce_type":     "sagaflow.inventory.v1.SeatHeld",
 		"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
 	}
-	err = p.Publish(ctx, []outbox.Claimed{{
-		ID: 1,
-		Message: outbox.Message{
-			Topic:   topic,
-			Key:     "seat-BA117-2026-09-01-14A",
-			Payload: []byte{0x00, 0x0a, 0x0b},
-			Headers: wantHeaders,
-		},
+	err = p.Publish(ctx, []envelope.Message{{
+		Topic:   topic,
+		Key:     "seat-BA117-2026-09-01-14A",
+		Payload: []byte{0x00, 0x0a, 0x0b},
+		Headers: wantHeaders,
 	}})
 	if err != nil {
 		t.Fatalf("publish: %v", err)
@@ -128,16 +131,13 @@ func TestPublishSameKeyKeepsOrder(t *testing.T) {
 	defer p.Close()
 
 	const total = 20
-	var batch []outbox.Claimed
+	var batch []envelope.Message
 	for i := range total {
-		batch = append(batch, outbox.Claimed{
-			ID: int64(i + 1),
-			Message: outbox.Message{
-				Topic:   topic,
-				Key:     "seat-14A", // one key ⇒ one partition ⇒ ordered
-				Payload: []byte{byte(i)},
-				Headers: map[string]string{"ce_id": "id"},
-			},
+		batch = append(batch, envelope.Message{
+			Topic:   topic,
+			Key:     "seat-14A", // one key ⇒ one partition ⇒ ordered
+			Payload: []byte{byte(i)},
+			Headers: map[string]string{"ce_id": "id"},
 		})
 	}
 	if err := p.Publish(ctx, batch); err != nil {

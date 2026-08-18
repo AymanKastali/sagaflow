@@ -12,8 +12,8 @@ import (
 	"log/slog"
 	"os"
 
-	inventoryv1 "github.com/kptac/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
-	"github.com/kptac/sagaflow/internal/platform/kafka"
+	inventoryv1 "github.com/kptac/sagaflow/contracts/sagaflow/inventory/v1"
+	"github.com/kptac/sagaflow/internal/platform/schema"
 	"github.com/twmb/franz-go/pkg/sr"
 	"google.golang.org/protobuf/proto"
 )
@@ -54,7 +54,7 @@ func run(ctx context.Context, registry string) error {
 	// this very run is rejected rather than accepted and enforced only next time.
 	// A registry defaults to NONE, which would quietly drop one of the three
 	// layers spec §8.3 asks for.
-	if err := kafka.EnsureBackwardCompatibility(ctx, cl); err != nil {
+	if err := schema.EnsureBackwardCompatibility(ctx, cl); err != nil {
 		return err
 	}
 	slog.Info("compatibility pinned", "level", "BACKWARD", "scope", "global")
@@ -73,7 +73,7 @@ func register(ctx context.Context, cl *sr.Client, b binding) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", b.file, err)
 	}
-	subject := kafka.Subject(b.topic, string(b.msg.ProtoReflect().Descriptor().FullName()))
+	subject := schema.Subject(b.topic, string(b.msg.ProtoReflect().Descriptor().FullName()))
 
 	ss, err := cl.CreateSchema(ctx, subject, sr.Schema{
 		Schema: string(text),

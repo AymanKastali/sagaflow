@@ -1,11 +1,12 @@
-// Package platform_test holds the cross-package deliverable for spec §13 phase 4:
-// an event committed in one service's transaction reaching another service's
-// handler, applied exactly once.
+// Package integration holds cross-package deliverables — tests that exercise
+// several platform packages together rather than any one of them.
 //
-// It lives here rather than in a service package because the services are phases
-// 5–8. Two databases in one container, never one database with two schemas: no
-// transaction can span them, which is the property being demonstrated.
-package platform_test
+// The first is spec §13 phase 4: an event committed in one service's transaction
+// reaching another service's handler, applied exactly once. It lives here rather
+// than in a service package because the services are phases 5–8. Two databases in
+// one container, never one database with two schemas: no transaction can span
+// them, which is the property being demonstrated.
+package integration_test
 
 import (
 	"context"
@@ -20,15 +21,15 @@ import (
 	bookingmigrations "github.com/kptac/sagaflow/internal/booking/migrations"
 	inventorymigrations "github.com/kptac/sagaflow/internal/inventory/migrations"
 	"github.com/kptac/sagaflow/internal/platform/codec"
-	inventoryv1 "github.com/kptac/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
+	inventoryv1 "github.com/kptac/sagaflow/contracts/sagaflow/inventory/v1"
 	"github.com/kptac/sagaflow/internal/platform/envelope"
 	"github.com/kptac/sagaflow/internal/platform/eventstore"
 	"github.com/kptac/sagaflow/internal/platform/inbox"
 	"github.com/kptac/sagaflow/internal/platform/kafka"
-	"github.com/kptac/sagaflow/internal/platform/kafkatest"
 	"github.com/kptac/sagaflow/internal/platform/outbox"
 	"github.com/kptac/sagaflow/internal/platform/pg"
-	"github.com/kptac/sagaflow/internal/platform/pgtest"
+	"github.com/kptac/sagaflow/internal/testsupport/kafkatest"
+	"github.com/kptac/sagaflow/internal/testsupport/pgtest"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -154,7 +155,7 @@ func TestEventCrossesServicesExactlyOnce(t *testing.T) {
 		if err := eventstore.Append(ctx, tx, seat, 0, []eventstore.Event{storedEvent}); err != nil {
 			return err
 		}
-		return outbox.Enqueue(ctx, tx, []outbox.Message{{
+		return outbox.Enqueue(ctx, tx, []envelope.Message{{
 			Topic: eventsTopic, Key: seat, Payload: wire, Headers: env.Headers(),
 		}})
 	}); err != nil {
@@ -205,9 +206,9 @@ func TestEventCrossesServicesExactlyOnce(t *testing.T) {
 	// --- duplicate delivery: the same ce_id produced again changes nothing ---
 	republish := func(e envelope.Envelope) {
 		t.Helper()
-		if err := producer.Publish(ctx, []outbox.Claimed{{
-			Message: outbox.Message{Topic: eventsTopic, Key: seat, Payload: wire, Headers: e.Headers()},
-		}}); err != nil {
+		if err := producer.Publish(ctx, []envelope.Message{
+			{Topic: eventsTopic, Key: seat, Payload: wire, Headers: e.Headers()},
+		}); err != nil {
 			t.Fatalf("publish %s: %v", e.ID, err)
 		}
 	}
@@ -272,15 +273,15 @@ func TestRebalanceMidHandlerLosesNothing(t *testing.T) {
 	// One key per event so records spread across partitions and a rebalance actually
 	// moves work between members.
 	const total = 60
-	var batch []outbox.Claimed
+	var batch []envelope.Message
 	for i := range total {
 		e := envelope.Envelope{
 			ID: envelope.NewID(), Source: source, Type: "sagaflow.inventory.v1.SeatHeld",
 			Subject: fmt.Sprintf("seat-%03d", i),
 		}
-		batch = append(batch, outbox.Claimed{Message: outbox.Message{
+		batch = append(batch, envelope.Message{
 			Topic: topic, Key: e.Subject, Payload: []byte(`{}`), Headers: e.Headers(),
-		}})
+		})
 	}
 	if err := producer.Publish(ctx, batch); err != nil {
 		t.Fatalf("publish: %v", err)

@@ -102,3 +102,35 @@ func Parse(h map[string]string) (Envelope, error) {
 	}
 	return e, nil
 }
+
+// Message is one message to publish: a body, the headers an Envelope renders,
+// and the routing key.
+//
+// It lives here rather than in outbox because it is the vocabulary two packages
+// share — outbox rows and dead letters are both Messages, and a dead letter was
+// never in the outbox.
+type Message struct {
+	Topic   string
+	Key     string
+	Payload []byte
+	Headers map[string]string
+}
+
+// Validate rejects a message that could not be published correctly. It is
+// exported because outbox.Enqueue is now an outside caller.
+//
+// The strings are unprefixed because every caller wraps them with its own
+// context.
+func (m Message) Validate() error {
+	switch {
+	case m.Topic == "":
+		return errors.New("no topic")
+	case m.Key == "":
+		// Without a key Kafka round-robins the record, which destroys the
+		// per-stream ordering every consumer downstream relies on.
+		return errors.New("no key")
+	case len(m.Payload) == 0:
+		return errors.New("no payload")
+	}
+	return nil
+}
