@@ -21,8 +21,11 @@ func TestFullNamesMatchTheSpec(t *testing.T) {
 		msg  proto.Message
 		want string
 	}{
-		{&inventoryv1.SeatHeld{}, "sagaflow.inventory.v1.SeatHeld"},
 		{&inventoryv1.HoldSeat{}, "sagaflow.inventory.v1.HoldSeat"},
+		{&inventoryv1.ReleaseSeatHold{}, "sagaflow.inventory.v1.ReleaseSeatHold"},
+		{&inventoryv1.SeatHeld{}, "sagaflow.inventory.v1.SeatHeld"},
+		{&inventoryv1.SeatHoldReleased{}, "sagaflow.inventory.v1.SeatHoldReleased"},
+		{&inventoryv1.SeatUnavailable{}, "sagaflow.inventory.v1.SeatUnavailable"},
 	} {
 		got := string(tc.msg.ProtoReflect().Descriptor().FullName())
 		if got != tc.want {

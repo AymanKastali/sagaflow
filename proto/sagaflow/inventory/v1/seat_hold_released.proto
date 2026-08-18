@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package sagaflow.inventory.v1;
+
+// SeatHoldReleased records that a live hold ended without being confirmed. It is
+// how the saga learns its compensation landed, which is why inventory emits it
+// even when the hold was already gone.
+message SeatHoldReleased {
+  string hold_id = 1;
+  string booking_id = 2;
+  string seat_id = 3;
+  string reason = 4;
+}

@@ -114,7 +114,7 @@ func TestSubjectUsesTopicRecordNameStrategy(t *testing.T) {
 func TestSerdeRoundTripsThroughConfluentFraming(t *testing.T) {
 	ctx := t.Context()
 	cl := client(t, srtest.Shared(t).URL())
-	register(t, cl, topic, "../../../proto/sagaflow/inventory/v1/events.proto", &inventoryv1.SeatHeld{})
+	register(t, cl, topic, "../../../proto/sagaflow/inventory/v1/seat_held.proto", &inventoryv1.SeatHeld{})
 
 	s, err := schema.NewTopicSerde(ctx, cl, topic, &inventoryv1.SeatHeld{})
 	if err != nil {
@@ -154,7 +154,7 @@ func TestSerdeRoundTripsThroughConfluentFraming(t *testing.T) {
 func TestBackwardCompatibilityRejectsAFieldTypeChange(t *testing.T) {
 	ctx := t.Context()
 	cl := client(t, srtest.Shared(t).URL())
-	const file = "../../../proto/sagaflow/inventory/v1/events.proto"
+	const file = "../../../proto/sagaflow/inventory/v1/seat_held.proto"
 	register(t, cl, topic, file, &inventoryv1.SeatHeld{})
 
 	if err := schema.EnsureBackwardCompatibility(ctx, cl); err != nil {
