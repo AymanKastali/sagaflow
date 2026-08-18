@@ -381,8 +381,8 @@ makes "crash a service mid-saga" a `cancel()` call in a test rather than a conta
 
 ### 7.2 The one invariant governing every handler
 
-A single transaction writes **exactly one stream**, plus its outbox rows, plus its inbox row. Never two
-streams.
+A single transaction writes **exactly one stream**, plus its outbox rows, its inbox row, and any timer
+it scheduled. Never two streams.
 
 ```go
 tx.Begin()
@@ -392,8 +392,13 @@ tx.Begin()
   cmds  := state.Decide(event)                             // pure
   store.Append(tx, streamID, expectedVersion, newEvents)
   outbox.Enqueue(tx, cmds, newEvents)                      // same commit ⇒ no lost messages
+  timers.Schedule(tx, decision.Timers)                     // same commit ⇒ no unexpirable hold
 tx.Commit()
 ```
+
+The timer belongs in this commit for the same reason the outbox row does. A hold whose event committed
+but whose timer did not is a seat that no clock will ever free — the precise failure §10.5's TTL exists
+to prevent, reintroduced by scheduling it a millisecond too late.
 
 `MarkConsumed` uses `ON CONFLICT DO NOTHING` and reports rows-affected rather than letting the unique
 violation raise. This is not a style choice: in Postgres *any* error aborts the whole transaction, so a
@@ -740,6 +745,14 @@ CREATE INDEX timers_due ON timers (fire_at) WHERE fired_at IS NULL;
 
 Same claim-based pattern as the outbox, and both emit through the normal append-plus-outbox path — so a
 timeout is just another event with no special delivery path to test.
+
+It needs none of the outbox's leader election, though, and the difference is worth being precise about.
+The outbox elects because its effect — the Kafka publish — happens *outside* the row's transaction, so
+two pollers claiming the same row would publish it twice. A timer's entire effect is inside the
+transaction that claims it: mark the row fired, append, enqueue, commit. Two schedulers racing the same
+row means the second one's `UPDATE … WHERE fired_at IS NULL` reports zero rows and it rolls back
+having done nothing. The row is the whole fence, which is also why this path needs no inbox row —
+nothing was delivered to deduplicate.
 
 Late and duplicate fires are absorbed for free: `Decide` is state-driven, so a `StepTimedOut` arriving
 after `SeatHeld` landed hits a state where the step is complete and returns no commands. `token` covers
