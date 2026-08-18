@@ -2,10 +2,12 @@ package inventory_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	inventoryv1 "github.com/AymanKastali/sagaflow/contracts/sagaflow/inventory/v1"
 	"github.com/AymanKastali/sagaflow/internal/inventory"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -152,5 +154,119 @@ func TestASeatWithNoStreamHasNoRow(t *testing.T) {
 	}
 	if _, ok, err := inventory.LoadAvailability(ctx, pool, seat); err != nil || ok {
 		t.Fatalf("want no row and no error, got ok=%v err=%v", ok, err)
+	}
+}
+
+// snapshot reads the whole view as text, so two builds of it can be compared
+// without asserting field by field what "the same" means.
+func snapshot(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []string {
+	t.Helper()
+	rows, err := pool.Query(ctx,
+		`SELECT seat_id || ' ' || status || ' ' || hold_id || ' ' || booking_id || ' ' ||
+		        coalesce(expires_at::text, '-') || ' v' || version
+		 FROM seat_availability ORDER BY seat_id`)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatalf("scan snapshot row: %v", err)
+		}
+		out = append(out, line)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate snapshot: %v", err)
+	}
+	return out
+}
+
+func TestDroppingTheViewAndBuildingItAgainGivesTheSameRows(t *testing.T) {
+	// This is what "derived" means, stated as a test: nothing in the view is
+	// remembered anywhere but the streams, so throwing it away costs nothing.
+	ctx := t.Context()
+	pool := db(t, "inventory_projection_rebuild")
+	h := inventory.NewHandler(pool, jsonEncoder{})
+	p := inventory.NewProjector(pool)
+
+	apply(t, ctx, h, seat, holdSeatOn(seat, hold))
+	apply(t, ctx, h, seat, releaseSeatOn(seat, hold))
+	apply(t, ctx, h, seat, holdSeatOn(seat, "hold-3"))
+	apply(t, ctx, h, otherFlightSeat, holdSeatOn(otherFlightSeat, "hold-2"))
+	for _, id := range []string{seat, otherFlightSeat} {
+		if err := p.Project(ctx, id); err != nil {
+			t.Fatalf("project %s: %v", id, err)
+		}
+	}
+	before := snapshot(t, ctx, pool)
+	if len(before) != 2 {
+		t.Fatalf("two seats have streams, so the view has two rows, got %d: %v", len(before), before)
+	}
+
+	if err := p.Rebuild(ctx); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+
+	if after := snapshot(t, ctx, pool); !slices.Equal(before, after) {
+		t.Fatalf("rebuild changed the view.\nbefore: %v\nafter:  %v", before, after)
+	}
+}
+
+func TestAStaleViewStillCannotOversellASeat(t *testing.T) {
+	// The whole reason the view is allowed to lag. It says nothing is held, the
+	// stream says 14A is, and the hold is decided from the stream — so the second
+	// customer is refused rather than sold a seat that is already gone.
+	ctx := t.Context()
+	pool := db(t, "inventory_projection_stale")
+	h := inventory.NewHandler(pool, jsonEncoder{})
+
+	apply(t, ctx, h, seat, holdSeatOn(seat, hold))
+	// Deliberately no Project: this is the window between the hold committing and
+	// the notification arriving, which is exactly where a real browse lands.
+	if _, ok, err := inventory.LoadAvailability(ctx, pool, seat); err != nil || ok {
+		t.Fatalf("the view has not caught up yet, so it must have no row: ok=%v err=%v", ok, err)
+	}
+
+	apply(t, ctx, h, seat, holdSeatOn(seat, "hold-late"))
+
+	rows := outboxRows(t, ctx, pool)
+	const unavailable = "sagaflow.inventory.v1.SeatUnavailable"
+	if last := rows[len(rows)-1]; last.ceTyp != unavailable {
+		t.Fatalf("the second hold read a stale view but must still be refused: want %s, got %s",
+			unavailable, last.ceTyp)
+	}
+}
+
+func TestAnOlderDerivationDoesNotDragTheRowBackwards(t *testing.T) {
+	// Two re-derivations can overlap — a rebuild and a live notification, or two
+	// notifications for one seat. The one that read the older stream must lose.
+	ctx := t.Context()
+	pool := db(t, "inventory_projection_backwards")
+	h := inventory.NewHandler(pool, jsonEncoder{})
+	p := inventory.NewProjector(pool)
+
+	apply(t, ctx, h, seat, holdSeatOn(seat, hold))
+
+	// A row already ahead of the stream, as a slow re-derivation would find on
+	// waking up to discover someone else got there first.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO seat_availability (seat_id, status, hold_id, booking_id, expires_at, version)
+		 VALUES ($1, 'free', '', '', NULL, 9)`, seat); err != nil {
+		t.Fatalf("seed newer row: %v", err)
+	}
+
+	if err := p.Project(ctx, seat); err != nil {
+		t.Fatalf("project: %v", err)
+	}
+
+	got, _, err := inventory.LoadAvailability(ctx, pool, seat)
+	if err != nil {
+		t.Fatalf("load availability: %v", err)
+	}
+	if got.Version != 9 || got.Status != inventory.StatusFree {
+		t.Fatalf("the newer row must survive an older fold, got %+v", got)
 	}
 }
