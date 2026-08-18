@@ -24,8 +24,9 @@ const (
 // SeatUnavailable refuses a HoldSeat because the seat is already held.
 //
 // It is a reply, not a fact about the seat, so it is never appended to the seat
-// stream — nothing happened to the seat. The saga turns it into BookingRejected
-// (spec §9.3) and the HTTP layer turns it into a 409 (phase 8).
+// stream — nothing happened to the seat, and appending it would grow the seat's
+// history by one row for every losing racer. The saga turns it into
+// BookingRejected; the HTTP layer will turn that into a 409.
 type SeatUnavailable struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	HoldId        string                 `protobuf:"bytes,1,opt,name=hold_id,json=holdId,proto3" json:"hold_id,omitempty"`

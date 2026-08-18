@@ -1,7 +1,7 @@
 // Package integration holds cross-package deliverables — tests that exercise
 // several platform packages together rather than any one of them.
 //
-// The first is spec §13 phase 4: an event committed in one service's transaction
+// The first is the phase-4 deliverable: an event committed in one service's transaction
 // reaching another service's handler, applied exactly once. It lives here rather
 // than in a service package because the services are phases 5–8. Two databases in
 // one container, never one database with two schemas: no transaction can span
@@ -33,7 +33,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// One Postgres and one Kafka for the whole package (spec §12.4). Both tests below
+// One Postgres and one Kafka for the whole package. Both tests below
 // stand up their own databases and topics inside them.
 func TestMain(m *testing.M) {
 	stopPG, err := pgtest.Start()
@@ -64,7 +64,7 @@ func db(t *testing.T, name string, schema fs.FS) *pgxpool.Pool {
 	return pgtest.Shared(t).Migrated(t, name, schema)
 }
 
-// applySeatHeld is the shape every real handler will take (spec §7.2): dedupe,
+// applySeatHeld is the shape every real handler takes — one transaction: dedupe,
 // load, decide, append — one transaction, one stream.
 //
 // It reports whether it wrote, so the caller signals only work that survived the
