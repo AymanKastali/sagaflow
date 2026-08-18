@@ -180,9 +180,6 @@ standard:
 survives without anyone remembering to care. It walks the tree: a package added
 later that skips its chapter fails the suite the day it is written.
 
-*Not yet written — it arrives with the last documentation pass. Until then
-D1–D5 are checked by hand.*
-
 - **D1.** Every package under `internal/` and `contracts/` has a non-empty
   package comment.
 - **D2.** That comment is in a file named `doc.go` containing only the package

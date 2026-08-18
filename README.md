@@ -143,11 +143,11 @@ terminal; there is nothing to install and nothing to run.
 | Seat streams and holds | [internal/inventory](internal/inventory) | `go doc ./internal/inventory` |
 | Message contracts | [contracts/](contracts) | its own Go module |
 
-The package chapters are being written now — see the
-[legibility spec](docs/superpowers/specs/2026-08-18-legibility-design.md).
-Until a package has one, `go doc` shows only its existing summary — and for
-`internal/platform/kafka`, which has no package comment yet, only a list of
-symbols.
+Every package listed above has a chapter. The standard they are written to is in
+[conventions](docs/conventions.md), and it is enforced rather than trusted:
+`internal/docs/docs_test.go` fails the build if a package skips its chapter, drops
+a heading, or cites a spec section from anywhere but a chapter's closing
+section.
 
 ---
 
