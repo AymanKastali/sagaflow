@@ -44,8 +44,10 @@ already written and committed — rules C1–C7 govern every chapter here.
 - **The reader** is a competent Go programmer who has never seen this
   repository, does not know what a transactional outbox is, and has not read the
   design spec.
-- **No behavior change.** No function body, no SQL, no signature is altered. The
-  test suite must stay green with no test edits at all.
+- **No behavior change.** No function body, no SQL, no signature is altered.
+  **Test files may be edited for comment text only** — rule C6 makes `doc.go` the
+  sole home for `§`, and several test files carry citations, so the sweep has to
+  reach them. No assertion, no fixture and no test name changes.
 - **Nothing is explained in two places.** These chapters do not re-explain what
   `docs/architecture.md` or `docs/glossary.md` already cover; where they need a
   term they use it and let the glossary define it.

@@ -32,7 +32,9 @@ Operative standard: [docs/conventions.md](../../conventions.md), rules C1–C7.
 - **C7:** 60–120 lines per chapter.
 - **`doc.go` holds the package comment and nothing else.**
 - **No behavior change.** No function body, no signature, no configuration value
-  is altered. No test file is edited.
+  is altered. **Test files may be edited for comment text only** — rule C6 makes
+  `doc.go` the sole home for `§`, and several test files carry citations, so the
+  sweep has to reach them. No assertion, no fixture and no test name changes.
 - Module path is `github.com/AymanKastali/sagaflow`.
 
 ---
