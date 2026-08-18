@@ -33,7 +33,7 @@ func TestSeatStreamRoundTripsThroughPostgres(t *testing.T) {
 	var got inventory.SeatState
 	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
 		var err error
-		got, err = inventory.LoadSeat(ctx, tx, seat)
+		got, _, err = inventory.LoadSeat(ctx, tx, seat)
 		return err
 	}); err != nil {
 		t.Fatalf("load: %v", err)
@@ -80,7 +80,7 @@ func TestLoadOfAnEmptyStreamIsAFreeSeatAtVersionZero(t *testing.T) {
 	var got inventory.SeatState
 	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
 		var err error
-		got, err = inventory.LoadSeat(ctx, tx, "seat-never-touched")
+		got, _, err = inventory.LoadSeat(ctx, tx, "seat-never-touched")
 		return err
 	}); err != nil {
 		t.Fatalf("load: %v", err)

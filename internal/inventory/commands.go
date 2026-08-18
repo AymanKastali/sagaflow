@@ -107,7 +107,7 @@ func (h *Handler) applyInOneTransaction(ctx context.Context, incoming envelope.E
 		if err != nil || !firstDelivery {
 			return err // not firstDelivery: already applied, commit nothing, ack
 		}
-		state, err := LoadSeat(ctx, tx, seatID)
+		state, _, err := LoadSeat(ctx, tx, seatID)
 		if err != nil {
 			return err
 		}
@@ -127,7 +127,16 @@ func (h *Handler) applyInOneTransaction(ctx context.Context, incoming envelope.E
 		if err := scheduleTimers(ctx, tx, seatID, decision.Timers); err != nil {
 			return err
 		}
-		msgs, err := h.messages(decision.Messages(), incoming, seatID)
+		// A reply keeps the incoming correlation id so the saga can route it, and
+		// takes the incoming ce_id as its causation, so the chain can be walked
+		// back message by message.
+		msgs, err := outgoing(h.enc, decision.Messages(), envelope.Envelope{
+			Source:        Source,
+			Subject:       seatID,
+			CorrelationID: incoming.CorrelationID,
+			CausationID:   incoming.ID,
+			TraceParent:   incoming.TraceParent,
+		})
 		if err != nil {
 			return err
 		}
@@ -150,33 +159,28 @@ func scheduleTimers(ctx context.Context, tx pgx.Tx, seatID string, ts []Timer) e
 	return nil
 }
 
-// messages frames each outgoing message and wraps it in its own envelope.
+// outgoing frames each message and wraps it in its own envelope, taking
+// everything but the id and the type from tmpl.
 //
-// Each gets a new ce_id because each is a distinct message, keeps the
-// incoming correlation id so the saga can route the reply, and takes the
-// incoming ce_id as its causation id, so each outgoing message still names
-// the one that caused it and the chain can be walked back message by message.
-func (h *Handler) messages(msgs []proto.Message, in envelope.Envelope, seatID string) ([]envelope.Message, error) {
+// Each message gets a new ce_id because each is a distinct message. The rest —
+// which flow it belongs to, what caused it, which seat it is about — is the
+// caller's to fill in, because a reply to a command and a hold that ran out of
+// time answer those questions differently.
+func outgoing(enc Encoder, msgs []proto.Message, tmpl envelope.Envelope) ([]envelope.Message, error) {
 	out := make([]envelope.Message, 0, len(msgs))
 	for _, m := range msgs {
-		payload, err := h.enc.Encode(m)
+		payload, err := enc.Encode(m)
 		if err != nil {
 			return nil, fmt.Errorf("inventory: frame %s: %w", codec.TypeName(m), err)
 		}
-		outgoing := envelope.Envelope{
-			ID:            envelope.NewID(),
-			Source:        Source,
-			Type:          codec.TypeName(m),
-			Subject:       seatID,
-			CorrelationID: in.CorrelationID,
-			CausationID:   in.ID,
-			TraceParent:   in.TraceParent,
-		}
+		e := tmpl
+		e.ID = envelope.NewID()
+		e.Type = codec.TypeName(m)
 		out = append(out, envelope.Message{
 			Topic:   EventsTopic,
-			Key:     seatID, // the stream id, which is what preserves per-seat ordering
+			Key:     e.Subject, // the stream id, which is what preserves per-seat ordering
 			Payload: payload,
-			Headers: outgoing.Headers(),
+			Headers: e.Headers(),
 		})
 	}
 	return out, nil
