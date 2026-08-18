@@ -18,7 +18,7 @@
 
 Copied verbatim from spec §5 and §3. Every task's requirements implicitly include this section.
 
-- **Go 1.26.6.** Module path `github.com/kptac/sagaflow`.
+- **Go 1.26.6.** Module path `github.com/AymanKastali/sagaflow`.
 - **Pinned:** franz-go/pkg/sr v1.8.0, protobuf v1.36.12, google/uuid v1.6.0, `apicurio/apicurio-registry:3.3.1`. **Add no dependency not listed in spec §5.**
 - **The registry URL is path-scoped** (spec §8.5): `http://host:8080/apis/ccompat/v7`, never the bare host. Pointed at the root, every call 404s.
 - **Subject naming is `TopicRecordNameStrategy`** (spec §8.3): `<topic>-<fully.qualified.MessageName>`. The default `TopicNameStrategy` permits one schema per topic and would break on the second event type.
@@ -77,7 +77,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/kptac/sagaflow/internal/platform/envelope"
+	"github.com/AymanKastali/sagaflow/internal/platform/envelope"
 )
 
 func full() envelope.Envelope {
@@ -459,9 +459,9 @@ import (
 	"testing"
 	"time"
 
-	inventoryv1 "github.com/kptac/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
-	"github.com/kptac/sagaflow/internal/platform/kafka"
-	"github.com/kptac/sagaflow/internal/platform/srtest"
+	inventoryv1 "github.com/AymanKastali/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
+	"github.com/AymanKastali/sagaflow/internal/platform/kafka"
+	"github.com/AymanKastali/sagaflow/internal/platform/srtest"
 	"github.com/twmb/franz-go/pkg/sr"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -839,8 +839,8 @@ import (
 	"log/slog"
 	"os"
 
-	inventoryv1 "github.com/kptac/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
-	"github.com/kptac/sagaflow/internal/platform/kafka"
+	inventoryv1 "github.com/AymanKastali/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
+	"github.com/AymanKastali/sagaflow/internal/platform/kafka"
 	"github.com/twmb/franz-go/pkg/sr"
 	"google.golang.org/protobuf/proto"
 )

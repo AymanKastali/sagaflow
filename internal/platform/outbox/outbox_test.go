@@ -11,14 +11,14 @@ import (
 	"testing"
 	"time"
 
+	migrations "github.com/AymanKastali/sagaflow/internal/inventory/migrations"
+	"github.com/AymanKastali/sagaflow/internal/platform/envelope"
+	"github.com/AymanKastali/sagaflow/internal/platform/eventstore"
+	"github.com/AymanKastali/sagaflow/internal/platform/outbox"
+	"github.com/AymanKastali/sagaflow/internal/platform/pg"
+	"github.com/AymanKastali/sagaflow/internal/testsupport/pgtest"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	migrations "github.com/kptac/sagaflow/internal/inventory/migrations"
-	"github.com/kptac/sagaflow/internal/platform/envelope"
-	"github.com/kptac/sagaflow/internal/platform/eventstore"
-	"github.com/kptac/sagaflow/internal/platform/outbox"
-	"github.com/kptac/sagaflow/internal/platform/pg"
-	"github.com/kptac/sagaflow/internal/testsupport/pgtest"
 )
 
 // One container for the package (spec §12.4). Note this makes the advisory-lock

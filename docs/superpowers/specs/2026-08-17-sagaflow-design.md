@@ -288,7 +288,7 @@ becomes genuinely unwieldy.
 
 ```
 sagaflow/
-├── go.mod                          # module github.com/kptac/sagaflow  (adjust to your remote)
+├── go.mod                          # module github.com/AymanKastali/sagaflow  (adjust to your remote)
 ├── docker-compose.yml
 ├── Makefile                        # buf generate, migrate, test, up
 ├── buf.yaml
@@ -296,7 +296,7 @@ sagaflow/
 ├── proto/                          # contract source of truth
 │   └── sagaflow/<service>/v1/*.proto
 ├── contracts/                      # generated protobuf — its own module, public
-│   ├── go.mod                      # github.com/kptac/sagaflow/contracts
+│   ├── go.mod                      # github.com/AymanKastali/sagaflow/contracts
 │   └── sagaflow/<service>/v1/
 ├── cmd/
 │   ├── booking/main.go             # ~20 lines: config, wire.New, Run

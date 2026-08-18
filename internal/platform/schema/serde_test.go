@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	inventoryv1 "github.com/kptac/sagaflow/contracts/sagaflow/inventory/v1"
-	"github.com/kptac/sagaflow/internal/platform/schema"
-	"github.com/kptac/sagaflow/internal/testsupport/srtest"
+	inventoryv1 "github.com/AymanKastali/sagaflow/contracts/sagaflow/inventory/v1"
+	"github.com/AymanKastali/sagaflow/internal/platform/schema"
+	"github.com/AymanKastali/sagaflow/internal/testsupport/srtest"
 	"github.com/twmb/franz-go/pkg/sr"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"

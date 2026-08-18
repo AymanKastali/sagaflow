@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Go 1.26.6; module `github.com/kptac/sagaflow`; contracts are the second module `github.com/kptac/sagaflow/contracts`.
+- Go 1.26.6; module `github.com/AymanKastali/sagaflow`; contracts are the second module `github.com/AymanKastali/sagaflow/contracts`.
 - Proto package `sagaflow.inventory.v1` never changes — it is simultaneously `events.type`, `ce_type` and the registry subject.
 - **One top-level message per `.proto` file.** `platform/schema.register` hardcodes `sr.Index(0)`, the Confluent message-index shortcut for "first message in its file". A second message in a file would be framed under the wrong index and no other Confluent client could read it.
 - A single transaction writes **exactly one stream**, plus its outbox rows, plus its inbox row (spec §7.2).
@@ -243,8 +243,8 @@ import (
 	"testing"
 	"time"
 
-	inventoryv1 "github.com/kptac/sagaflow/contracts/sagaflow/inventory/v1"
-	"github.com/kptac/sagaflow/internal/inventory"
+	inventoryv1 "github.com/AymanKastali/sagaflow/contracts/sagaflow/inventory/v1"
+	"github.com/AymanKastali/sagaflow/internal/inventory"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -445,7 +445,7 @@ import (
 	"fmt"
 	"time"
 
-	inventoryv1 "github.com/kptac/sagaflow/contracts/sagaflow/inventory/v1"
+	inventoryv1 "github.com/AymanKastali/sagaflow/contracts/sagaflow/inventory/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -658,7 +658,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/kptac/sagaflow/internal/testsupport/pgtest"
+	"github.com/AymanKastali/sagaflow/internal/testsupport/pgtest"
 )
 
 // One Postgres for the whole package (spec §12.4). Isolation comes from database
@@ -691,12 +691,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	inventoryv1 "github.com/kptac/sagaflow/contracts/sagaflow/inventory/v1"
-	"github.com/kptac/sagaflow/internal/inventory"
-	"github.com/kptac/sagaflow/internal/inventory/migrations"
-	"github.com/kptac/sagaflow/internal/platform/eventstore"
-	"github.com/kptac/sagaflow/internal/platform/pg"
-	"github.com/kptac/sagaflow/internal/testsupport/pgtest"
+	inventoryv1 "github.com/AymanKastali/sagaflow/contracts/sagaflow/inventory/v1"
+	"github.com/AymanKastali/sagaflow/internal/inventory"
+	"github.com/AymanKastali/sagaflow/internal/inventory/migrations"
+	"github.com/AymanKastali/sagaflow/internal/platform/eventstore"
+	"github.com/AymanKastali/sagaflow/internal/platform/pg"
+	"github.com/AymanKastali/sagaflow/internal/testsupport/pgtest"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -824,8 +824,8 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/kptac/sagaflow/internal/platform/codec"
-	"github.com/kptac/sagaflow/internal/platform/eventstore"
+	"github.com/AymanKastali/sagaflow/internal/platform/codec"
+	"github.com/AymanKastali/sagaflow/internal/platform/eventstore"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -926,9 +926,9 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	inventoryv1 "github.com/kptac/sagaflow/contracts/sagaflow/inventory/v1"
-	"github.com/kptac/sagaflow/internal/inventory"
-	"github.com/kptac/sagaflow/internal/platform/envelope"
+	inventoryv1 "github.com/AymanKastali/sagaflow/contracts/sagaflow/inventory/v1"
+	"github.com/AymanKastali/sagaflow/internal/inventory"
+	"github.com/AymanKastali/sagaflow/internal/platform/envelope"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -1157,12 +1157,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/kptac/sagaflow/internal/platform/codec"
-	"github.com/kptac/sagaflow/internal/platform/envelope"
-	"github.com/kptac/sagaflow/internal/platform/eventstore"
-	"github.com/kptac/sagaflow/internal/platform/inbox"
-	"github.com/kptac/sagaflow/internal/platform/outbox"
-	"github.com/kptac/sagaflow/internal/platform/pg"
+	"github.com/AymanKastali/sagaflow/internal/platform/codec"
+	"github.com/AymanKastali/sagaflow/internal/platform/envelope"
+	"github.com/AymanKastali/sagaflow/internal/platform/eventstore"
+	"github.com/AymanKastali/sagaflow/internal/platform/inbox"
+	"github.com/AymanKastali/sagaflow/internal/platform/outbox"
+	"github.com/AymanKastali/sagaflow/internal/platform/pg"
 	"google.golang.org/protobuf/proto"
 )
 

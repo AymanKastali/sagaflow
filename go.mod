@@ -1,4 +1,4 @@
-module github.com/kptac/sagaflow
+module github.com/AymanKastali/sagaflow
 
 go 1.26.6
 
@@ -73,7 +73,7 @@ require (
 	github.com/jdx/go-netrc v1.0.0 // indirect
 	github.com/klauspost/compress v1.19.0 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
-	github.com/kptac/sagaflow/contracts v0.0.0
+	github.com/AymanKastali/sagaflow/contracts v0.0.0
 	github.com/lufia/plan9stats v0.0.0-20260330125221-c963978e514e // indirect
 	github.com/magiconair/properties v1.8.10 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
@@ -149,4 +149,4 @@ tool (
 	google.golang.org/protobuf/cmd/protoc-gen-go
 )
 
-replace github.com/kptac/sagaflow/contracts => ./contracts
+replace github.com/AymanKastali/sagaflow/contracts => ./contracts

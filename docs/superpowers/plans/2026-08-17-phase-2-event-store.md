@@ -19,7 +19,7 @@
 Copied verbatim from spec §5 and §3. Every task's requirements implicitly include this section.
 
 - **Go 1.26.6.** `go.mod` declares `go 1.26.6`; with `GOTOOLCHAIN=auto` the go command fetches that toolchain itself, so the installed go may be older and no machine-level upgrade is required.
-- **Module path:** `github.com/kptac/sagaflow`. One module at the repository root.
+- **Module path:** `github.com/AymanKastali/sagaflow`. One module at the repository root.
 - **Pinned images, never `latest`:** `apache/kafka:4.3.1`, `postgres:18.6`, `apicurio/apicurio-registry:3.3.1`, `cr.jaegertracing.io/jaegertracing/jaeger:2.20.0`.
 - **Pinned Go dependencies** (spec §5): franz-go v1.21.6, `franz-go/pkg/sr` v1.8.0, `franz-go/pkg/kadm` v1.18.0, pgx/v5 v5.10.0, tern/v2 v2.4.2, google/uuid v1.6.0, protobuf v1.36.12, otel + otel/sdk v1.45.0, testcontainers-go v0.44.0. **Add no dependency not listed in §5.**
 - **The OTel modules move as a set.** `otel`, `otel/sdk` and the trace exporter are released together; mixing versions fails at runtime, not build time.
@@ -139,9 +139,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/kptac/sagaflow/internal/platform/pg"
-	"github.com/kptac/sagaflow/internal/platform/pgtest"
-	migrations "github.com/kptac/sagaflow/internal/inventory/migrations"
+	"github.com/AymanKastali/sagaflow/internal/platform/pg"
+	"github.com/AymanKastali/sagaflow/internal/platform/pgtest"
+	migrations "github.com/AymanKastali/sagaflow/internal/inventory/migrations"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -389,7 +389,7 @@ func TestAppendEmptySliceIsANoOp(t *testing.T) {
 }
 ```
 
-Add these imports to the test file's import block: `encoding/json`, `errors`, `fmt`, `sync`, `github.com/jackc/pgx/v5`, `github.com/kptac/sagaflow/internal/platform/eventstore`.
+Add these imports to the test file's import block: `encoding/json`, `errors`, `fmt`, `sync`, `github.com/jackc/pgx/v5`, `github.com/AymanKastali/sagaflow/internal/platform/eventstore`.
 
 An empty append must be a no-op rather than an error because a pure `Decide` returning no events is the normal, expected outcome for a duplicate or late message — spec §10.5 relies on it.
 
