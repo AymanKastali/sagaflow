@@ -110,7 +110,7 @@ this is all of them. Do not rename anything not on this list.
 - [ ] **Step 1: Record the baseline so the rename can be proved behaviour-neutral**
 
 ```bash
-go test -short ./... 2>&1 | tail -20 > /tmp/before.txt
+go test -short ./... 2>&1 > /tmp/before.txt
 go test -short -v ./internal/inventory/ 2>&1 | grep -c '^=== RUN' > /tmp/before_count.txt
 cat /tmp/before_count.txt
 ```
@@ -153,7 +153,9 @@ Do not touch the test names or the assertions.
 gofmt -l internal/
 go build ./...
 go test -short -v ./internal/inventory/ 2>&1 | grep -c '^=== RUN'
-diff <(go test -short ./... 2>&1 | tail -20) /tmp/before.txt && echo "identical results"
+# strip cache markers and timings — they are never stable between runs
+diff <(go test -short ./... 2>&1 | sed -E 's/\t[0-9.]+s$|\t\(cached\)$//') \
+     <(sed -E 's/\t[0-9.]+s$|\t\(cached\)$//' /tmp/before.txt) && echo "identical results"
 ```
 
 Expected: `gofmt -l` silent; the RUN count identical to `/tmp/before_count.txt`;

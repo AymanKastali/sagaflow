@@ -70,19 +70,19 @@ func db(t *testing.T, name string, schema fs.FS) *pgxpool.Pool {
 // It reports whether it wrote, so the caller signals only work that survived the
 // commit. Signalling from inside the transaction would announce work a failed
 // commit then threw away.
-func applySeatHeld(ctx context.Context, pool *pgxpool.Pool, env envelope.Envelope, streamID string) (wrote bool, err error) {
+func applySeatHeld(ctx context.Context, pool *pgxpool.Pool, incoming envelope.Envelope, streamID string) (wrote bool, err error) {
 	err = pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
 		wrote = false
-		fresh, err := inbox.MarkConsumed(ctx, tx, sagaConsumer, env.Source, env.ID)
-		if err != nil || !fresh {
-			return err // not fresh: already applied, commit nothing, ack
+		firstDelivery, err := inbox.MarkConsumed(ctx, tx, sagaConsumer, incoming.Source, incoming.ID)
+		if err != nil || !firstDelivery {
+			return err // not firstDelivery: already applied, commit nothing, ack
 		}
 		existing, err := eventstore.Load(ctx, tx, streamID)
 		if err != nil {
 			return err
 		}
-		ev, err := codec.Encode(&inventoryv1.SeatHeld{HoldId: env.ID, SeatId: env.Subject},
-			eventstore.Meta{CorrelationID: env.CorrelationID, CausationID: env.ID})
+		ev, err := codec.Encode(&inventoryv1.SeatHeld{HoldId: incoming.ID, SeatId: incoming.Subject},
+			eventstore.Meta{CorrelationID: incoming.CorrelationID, CausationID: incoming.ID})
 		if err != nil {
 			return err
 		}
@@ -99,17 +99,17 @@ func applySeatHeld(ctx context.Context, pool *pgxpool.Pool, env envelope.Envelop
 // commit.
 func bookingHandler(pool *pgxpool.Pool, applied chan<- string, streamID func(envelope.Envelope) string) kafka.Handler {
 	return func(ctx context.Context, r kafka.Record) error {
-		env, err := envelope.Parse(r.Headers)
+		incoming, err := envelope.Parse(r.Headers)
 		if err != nil {
 			// An unparseable envelope will never parse on redelivery.
 			return fmt.Errorf("%w: %v", kafka.ErrPermanent, err)
 		}
-		wrote, err := applySeatHeld(ctx, pool, env, streamID(env))
+		wrote, err := applySeatHeld(ctx, pool, incoming, streamID(incoming))
 		if err != nil {
 			return err
 		}
 		if wrote {
-			applied <- env.ID
+			applied <- incoming.ID
 		}
 		return nil
 	}
@@ -142,7 +142,7 @@ func TestEventCrossesServicesExactlyOnce(t *testing.T) {
 		t.Fatalf("encode: %v", err)
 	}
 
-	env := envelope.Envelope{
+	incoming := envelope.Envelope{
 		ID: ceID, Source: source, Type: storedEvent.Type, Subject: seat,
 		CorrelationID: "saga-booking-1",
 	}
@@ -156,7 +156,7 @@ func TestEventCrossesServicesExactlyOnce(t *testing.T) {
 			return err
 		}
 		return outbox.Enqueue(ctx, tx, []envelope.Message{{
-			Topic: eventsTopic, Key: seat, Payload: wire, Headers: env.Headers(),
+			Topic: eventsTopic, Key: seat, Payload: wire, Headers: incoming.Headers(),
 		}})
 	}); err != nil {
 		t.Fatalf("inventory handler: %v", err)
@@ -212,12 +212,12 @@ func TestEventCrossesServicesExactlyOnce(t *testing.T) {
 			t.Fatalf("publish %s: %v", e.ID, err)
 		}
 	}
-	republish(env)
+	republish(incoming)
 
 	// No sleeping: send a second, distinct event and wait for it. Once that has been
 	// applied, the duplicate ahead of it in the same partition has certainly been
 	// processed, because one partition is handled in order.
-	second := env
+	second := incoming
 	second.ID = envelope.NewID()
 	republish(second)
 
