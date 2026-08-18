@@ -6,8 +6,8 @@ import (
 
 	"github.com/kptac/sagaflow/internal/platform/envelope"
 	"github.com/kptac/sagaflow/internal/platform/kafka"
-	"github.com/kptac/sagaflow/internal/platform/kafkatest"
 	"github.com/kptac/sagaflow/internal/platform/outbox"
+	"github.com/kptac/sagaflow/internal/testsupport/kafkatest"
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 )

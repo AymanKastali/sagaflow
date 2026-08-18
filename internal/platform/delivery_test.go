@@ -25,10 +25,10 @@ import (
 	"github.com/kptac/sagaflow/internal/platform/eventstore"
 	"github.com/kptac/sagaflow/internal/platform/inbox"
 	"github.com/kptac/sagaflow/internal/platform/kafka"
-	"github.com/kptac/sagaflow/internal/platform/kafkatest"
 	"github.com/kptac/sagaflow/internal/platform/outbox"
 	"github.com/kptac/sagaflow/internal/platform/pg"
-	"github.com/kptac/sagaflow/internal/platform/pgtest"
+	"github.com/kptac/sagaflow/internal/testsupport/kafkatest"
+	"github.com/kptac/sagaflow/internal/testsupport/pgtest"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/kptac/sagaflow/internal/platform/kafkatest"
+	"github.com/kptac/sagaflow/internal/testsupport/kafkatest"
 )
 
 // One broker for the whole package (spec §12.4). Isolation comes from topic names

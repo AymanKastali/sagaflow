@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/kptac/sagaflow/internal/platform/kafka"
-	"github.com/kptac/sagaflow/internal/platform/kafkatest"
+	"github.com/kptac/sagaflow/internal/testsupport/kafkatest"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 

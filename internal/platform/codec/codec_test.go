@@ -14,7 +14,7 @@ import (
 	inventoryv1 "github.com/kptac/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
 	"github.com/kptac/sagaflow/internal/platform/eventstore"
 	"github.com/kptac/sagaflow/internal/platform/pg"
-	"github.com/kptac/sagaflow/internal/platform/pgtest"
+	"github.com/kptac/sagaflow/internal/testsupport/pgtest"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
