@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kptac/sagaflow/internal/platform/envelope"
 )
 
 const (
@@ -187,7 +188,7 @@ func (p *Poller) Drain(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	if err := p.pub.Publish(ctx, claimed); err != nil {
+	if err := p.pub.Publish(ctx, messages(claimed)); err != nil {
 		// Rolling back releases the claim, so the rows are picked up next pass.
 		return 0, fmt.Errorf("outbox: publish %d messages: %w", len(claimed), err)
 	}
@@ -234,6 +235,17 @@ func ids(claimed []Claimed) []int64 {
 	out := make([]int64, len(claimed))
 	for i, c := range claimed {
 		out[i] = c.ID
+	}
+	return out
+}
+
+// messages strips the row ids the publisher has no use for. The correspondence
+// with claimed is positional, but nothing needs it: Publish is all-or-nothing,
+// so a success marks the whole batch.
+func messages(claimed []Claimed) []envelope.Message {
+	out := make([]envelope.Message, len(claimed))
+	for i, c := range claimed {
+		out[i] = c.Message
 	}
 	return out
 }

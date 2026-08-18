@@ -154,7 +154,7 @@ func TestEventCrossesServicesExactlyOnce(t *testing.T) {
 		if err := eventstore.Append(ctx, tx, seat, 0, []eventstore.Event{storedEvent}); err != nil {
 			return err
 		}
-		return outbox.Enqueue(ctx, tx, []outbox.Message{{
+		return outbox.Enqueue(ctx, tx, []envelope.Message{{
 			Topic: eventsTopic, Key: seat, Payload: wire, Headers: env.Headers(),
 		}})
 	}); err != nil {
@@ -205,9 +205,9 @@ func TestEventCrossesServicesExactlyOnce(t *testing.T) {
 	// --- duplicate delivery: the same ce_id produced again changes nothing ---
 	republish := func(e envelope.Envelope) {
 		t.Helper()
-		if err := producer.Publish(ctx, []outbox.Claimed{{
-			Message: outbox.Message{Topic: eventsTopic, Key: seat, Payload: wire, Headers: e.Headers()},
-		}}); err != nil {
+		if err := producer.Publish(ctx, []envelope.Message{
+			{Topic: eventsTopic, Key: seat, Payload: wire, Headers: e.Headers()},
+		}); err != nil {
 			t.Fatalf("publish %s: %v", e.ID, err)
 		}
 	}
@@ -272,15 +272,15 @@ func TestRebalanceMidHandlerLosesNothing(t *testing.T) {
 	// One key per event so records spread across partitions and a rebalance actually
 	// moves work between members.
 	const total = 60
-	var batch []outbox.Claimed
+	var batch []envelope.Message
 	for i := range total {
 		e := envelope.Envelope{
 			ID: envelope.NewID(), Source: source, Type: "sagaflow.inventory.v1.SeatHeld",
 			Subject: fmt.Sprintf("seat-%03d", i),
 		}
-		batch = append(batch, outbox.Claimed{Message: outbox.Message{
+		batch = append(batch, envelope.Message{
 			Topic: topic, Key: e.Subject, Payload: []byte(`{}`), Headers: e.Headers(),
-		}})
+		})
 	}
 	if err := producer.Publish(ctx, batch); err != nil {
 		t.Fatalf("publish: %v", err)
