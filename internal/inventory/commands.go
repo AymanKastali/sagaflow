@@ -11,6 +11,7 @@ import (
 	"github.com/AymanKastali/sagaflow/internal/platform/inbox"
 	"github.com/AymanKastali/sagaflow/internal/platform/outbox"
 	"github.com/AymanKastali/sagaflow/internal/platform/pg"
+	"github.com/AymanKastali/sagaflow/internal/platform/timers"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/proto"
@@ -77,12 +78,15 @@ func (h *Handler) Handle(ctx context.Context, incoming envelope.Envelope, cmd pr
 // applyInOneTransaction handles a single command in a single database
 // transaction, which either commits all of its effects or none of them.
 //
-// Three things are written together and must not come apart: the events the
-// command produced, the outgoing messages announcing them, and the record that
-// this command was consumed. If the events committed but the messages did not,
-// the world would never hear about a hold that exists. If the consumed-record
-// committed but the events did not, redelivery would be ignored and the command
-// would be lost.
+// Four things are written together and must not come apart: the events the
+// command produced, the outgoing messages announcing them, any deadline those
+// events need, and the record that this command was consumed. If the events
+// committed but the messages did not, the world would never hear about a hold
+// that exists. If the consumed-record committed but the events did not,
+// redelivery would be ignored and the command would be lost. If the events
+// committed but the timer did not, the hold would exist with no deadline
+// attached — held forever, with nothing anywhere recording that anything went
+// wrong.
 //
 // It writes exactly one stream, never two. A stream's invariant is only
 // checkable within one transaction, so writing a second stream here would be
@@ -120,12 +124,30 @@ func (h *Handler) applyInOneTransaction(ctx context.Context, incoming envelope.E
 		if err := AppendSeat(ctx, tx, seatID, state.Version, decision.Events, meta); err != nil {
 			return err
 		}
+		if err := scheduleTimers(ctx, tx, seatID, decision.Timers); err != nil {
+			return err
+		}
 		msgs, err := h.messages(decision.Messages(), incoming, seatID)
 		if err != nil {
 			return err
 		}
 		return outbox.Enqueue(ctx, tx, msgs)
 	})
+}
+
+// scheduleTimers records the decision's deadlines in the same transaction as the
+// events that need them.
+//
+// The deadline is passed through untouched rather than computed here. It came
+// from the command, which is what keeps the decision that produced it free of a
+// clock and testable without one.
+func scheduleTimers(ctx context.Context, tx pgx.Tx, seatID string, ts []Timer) error {
+	for _, t := range ts {
+		if err := timers.Schedule(ctx, tx, t.FireAt, seatID, t.Token); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // messages frames each outgoing message and wraps it in its own envelope.
