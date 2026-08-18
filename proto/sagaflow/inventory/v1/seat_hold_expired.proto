@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package sagaflow.inventory.v1;
+
+// SeatHoldExpired records that a hold reached its deadline without being
+// confirmed or released. It is inventory freeing its own resource, which is why
+// it can happen when the booking that took the hold no longer exists.
+message SeatHoldExpired {
+  string hold_id = 1;
+  string booking_id = 2;
+  string seat_id = 3;
+}

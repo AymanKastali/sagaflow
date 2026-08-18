@@ -300,3 +300,53 @@ func waitForLock(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 		}
 	}
 }
+
+func TestHoldingASeatCommitsItsTimerWithTheEvent(t *testing.T) {
+	// The event and its deadline are one commit or neither. A hold that
+	// committed without its timer is a seat no clock will ever free — the exact
+	// failure the TTL exists to prevent.
+	ctx := t.Context()
+	pool := db(t, "inventory_hold_timer")
+	h := inventory.NewHandler(pool, jsonEncoder{})
+
+	cmd := holdSeat(hold)
+	if err := h.Handle(ctx, command(cmd), cmd); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+
+	var subject, token string
+	if err := pool.QueryRow(ctx,
+		`SELECT subject, token FROM timers WHERE fired_at IS NULL`).
+		Scan(&subject, &token); err != nil {
+		t.Fatalf("the hold committed without its timer: %v", err)
+	}
+	if subject != seat || token != hold {
+		t.Fatalf("the timer names the wrong seat or hold: subject %q, token %q", subject, token)
+	}
+}
+
+func TestARefusedHoldSchedulesNoTimer(t *testing.T) {
+	// Nothing changed, so there is nothing to expire. A timer here would be a
+	// row waiting to fire on a hold this service never took.
+	ctx := t.Context()
+	pool := db(t, "inventory_refused_timer")
+	h := inventory.NewHandler(pool, jsonEncoder{})
+
+	first := holdSeat("hold-1")
+	if err := h.Handle(ctx, command(first), first); err != nil {
+		t.Fatalf("first hold: %v", err)
+	}
+	second := holdSeat("hold-2")
+	if err := h.Handle(ctx, command(second), second); err != nil {
+		t.Fatalf("second hold: %v", err)
+	}
+
+	var pending int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM timers WHERE fired_at IS NULL`).Scan(&pending); err != nil {
+		t.Fatalf("count timers: %v", err)
+	}
+	if pending != 1 {
+		t.Fatalf("one hold was taken and one refused, so one timer: got %d", pending)
+	}
+}

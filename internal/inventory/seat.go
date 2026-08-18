@@ -49,7 +49,10 @@ func (s SeatState) Apply(e proto.Message) (SeatState, error) {
 	case *inventoryv1.SeatHeld:
 		s.Status, s.HoldID, s.BookingID = StatusHeld, e.HoldId, e.BookingId
 		s.ExpiresAt = e.ExpiresAt.AsTime()
-	case *inventoryv1.SeatHoldReleased:
+	// Released and expired differ in why the hold ended, not in what the seat
+	// becomes. A fold that cared about the difference would be reading intent
+	// out of history it is only supposed to be replaying.
+	case *inventoryv1.SeatHoldReleased, *inventoryv1.SeatHoldExpired:
 		s.Status, s.HoldID, s.BookingID, s.ExpiresAt = StatusFree, "", "", time.Time{}
 	default:
 		return s, fmt.Errorf("%w: %s", ErrUnknownEvent, e.ProtoReflect().Descriptor().FullName())
@@ -71,16 +74,32 @@ func Fold(evts []proto.Message) (SeatState, error) {
 	return s, nil
 }
 
-// Outcome is what a decision produces: events to append to the seat stream, and
-// replies to publish without appending.
+// Timer is a wake-up a decision asks for: come back at FireAt, carrying Token so
+// whoever wakes up can tell whether the world moved on in the meantime.
 //
-// The split is this phase's one invariant — every command gets a reply, only a
-// change gets an event. Appending refusals and re-announcements would make a
-// seat's history grow with every failed race and every saga re-dispatch, for
-// events no fold would ever act on.
+// The decision names its own deadlines rather than a handler inferring them from
+// the events, and it still needs no clock to do so — the deadline arrived in the
+// command.
+type Timer struct {
+	FireAt time.Time
+	Token  string
+}
+
+// Outcome is what a decision produces: events to append to the seat stream,
+// replies to publish without appending, and deadlines to come back at.
+//
+// The first split is the invariant phase 5a introduced — every command gets a
+// reply, only a change gets an event. Appending refusals and re-announcements
+// would make a seat's history grow with every failed race and every saga
+// re-dispatch, for events no fold would ever act on.
+//
+// Timers accompany events and never replies. A re-announced hold already has the
+// timer that was scheduled when it was taken, so a second one would be a row in
+// the table for a deadline that is already covered.
 type Outcome struct {
 	Events  []proto.Message
 	Replies []proto.Message
+	Timers  []Timer
 }
 
 // Messages is everything the outcome publishes. Events go out too: an append
@@ -107,12 +126,17 @@ func (s SeatState) Hold(cmd *inventoryv1.HoldSeat) Outcome {
 			Reason:    "seat is " + s.Status.String(),
 		}}}
 	}
-	return Outcome{Events: []proto.Message{&inventoryv1.SeatHeld{
-		HoldId:    cmd.HoldId,
-		BookingId: cmd.BookingId,
-		SeatId:    cmd.SeatId,
-		ExpiresAt: cmd.ExpiresAt,
-	}}}
+	return Outcome{
+		Events: []proto.Message{&inventoryv1.SeatHeld{
+			HoldId:    cmd.HoldId,
+			BookingId: cmd.BookingId,
+			SeatId:    cmd.SeatId,
+			ExpiresAt: cmd.ExpiresAt,
+		}},
+		// AsTime on a nil deadline is the zero time, which is already past: a
+		// malformed hold expires on the next pass rather than never.
+		Timers: []Timer{{FireAt: cmd.ExpiresAt.AsTime(), Token: cmd.HoldId}},
+	}
 }
 
 // Release decides a ReleaseSeatHold command, the compensation for HoldSeat.
@@ -133,6 +157,31 @@ func (s SeatState) Release(cmd *inventoryv1.ReleaseSeatHold) Outcome {
 		return Outcome{Replies: []proto.Message{released}}
 	}
 	return Outcome{Events: []proto.Message{released}}
+}
+
+// Expire decides that the hold named by holdID has reached its deadline.
+//
+// It is the one decision here that can produce nothing at all. Every other
+// decision answers a command that someone sent and is waiting on, so silence
+// would strand a saga. A timer is not a command: nothing sent it, nothing
+// correlates to it, and there is no envelope to reply into. When the hold is
+// already gone — released, or superseded by a later one — doing nothing is the
+// whole correct answer.
+//
+// That is also why timers are never cancelled. A release and its hold's deadline
+// can arrive in either order, and the outcome is the same either way, because the
+// stream decides rather than the clock.
+//
+// seatID comes before holdID to match the timer's own subject-then-token order.
+func (s SeatState) Expire(seatID, holdID string) Outcome {
+	if s.Status != StatusHeld || s.HoldID != holdID {
+		return Outcome{}
+	}
+	return Outcome{Events: []proto.Message{&inventoryv1.SeatHoldExpired{
+		HoldId:    s.HoldID,
+		BookingId: s.BookingID,
+		SeatId:    seatID,
+	}}}
 }
 
 // held rebuilds the SeatHeld describing the live hold, for re-announcement.

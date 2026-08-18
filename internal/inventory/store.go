@@ -10,24 +10,39 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// LoadSeat folds a seat stream into its state, inside the caller's transaction.
+// LoadSeat folds a seat stream into its state, inside the caller's transaction,
+// and returns the metadata of the last event alongside it.
 //
 // Reading in the same transaction as the later append is what makes the returned
 // Version a safe expected version: nothing can interleave between the two.
-func LoadSeat(ctx context.Context, tx pgx.Tx, seatID string) (SeatState, error) {
+//
+// The metadata is the flow that put the seat in the state returned with it — for
+// a held seat, the saga that took the hold. A handler with no incoming envelope
+// to copy from has nowhere else to learn that, and reading it back off the stream
+// is better than storing a copy elsewhere, because the stream cannot go stale
+// against itself. It is deliberately not part of SeatState: the fold sees only
+// messages, and giving it envelope metadata would make replay depend on how the
+// events happened to be delivered.
+func LoadSeat(ctx context.Context, tx pgx.Tx, seatID string) (SeatState, eventstore.Meta, error) {
 	recorded, err := eventstore.Load(ctx, tx, seatID)
 	if err != nil {
-		return SeatState{}, err
+		return SeatState{}, eventstore.Meta{}, err
 	}
 	msgs := make([]proto.Message, len(recorded))
 	for i, r := range recorded {
 		m, err := codec.Decode(r.Event)
 		if err != nil {
-			return SeatState{}, fmt.Errorf("inventory: decode %s v%d: %w", seatID, r.Version, err)
+			return SeatState{}, eventstore.Meta{}, fmt.Errorf(
+				"inventory: decode %s v%d: %w", seatID, r.Version, err)
 		}
 		msgs[i] = m
 	}
-	return Fold(msgs)
+	var last eventstore.Meta
+	if len(recorded) > 0 {
+		last = recorded[len(recorded)-1].Meta
+	}
+	state, err := Fold(msgs)
+	return state, last, err
 }
 
 // AppendSeat encodes evts and appends them at expectedVersion+1 …

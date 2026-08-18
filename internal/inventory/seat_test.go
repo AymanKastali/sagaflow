@@ -33,6 +33,12 @@ func heldEvent(holdID string) *inventoryv1.SeatHeld {
 	}
 }
 
+func releasedEvent(holdID string) *inventoryv1.SeatHoldReleased {
+	return &inventoryv1.SeatHoldReleased{
+		HoldId: holdID, BookingId: booking, SeatId: seat, Reason: "compensating",
+	}
+}
+
 // state folds the events onto a fresh seat, failing the test rather than
 // returning an error, so every case below reads as state-then-decision.
 func state(t *testing.T, evts ...proto.Message) inventory.SeatState {
@@ -162,5 +168,105 @@ func TestSeatIDIsTheCommandsSeatID(t *testing.T) {
 	}
 	if got != seat {
 		t.Fatalf("want %q, got %q", seat, got)
+	}
+}
+
+func TestAnExpiryOfTheLiveHoldFreesTheSeat(t *testing.T) {
+	held := state(t, heldEvent(hold))
+
+	got := held.Expire(seat, hold)
+
+	if len(got.Events) != 1 || len(got.Replies) != 0 {
+		t.Fatalf("expiry changes the seat, so it is one event and no reply: %+v", got)
+	}
+	expired, ok := got.Events[0].(*inventoryv1.SeatHoldExpired)
+	if !ok {
+		t.Fatalf("wrong event type: %T", got.Events[0])
+	}
+	if expired.HoldId != hold || expired.BookingId != booking || expired.SeatId != seat {
+		t.Fatalf("the expiry lost the identity of what it freed: %+v", expired)
+	}
+
+	after, err := held.Apply(expired)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if after.Status != inventory.StatusFree || after.HoldID != "" {
+		t.Fatalf("an expired hold leaves the seat free: %+v", after)
+	}
+}
+
+func TestAnExpiryOfAHoldThatIsGoneProducesNothingAtAll(t *testing.T) {
+	// The only decision in this package that is allowed to be silent. Nothing
+	// sent this and nothing is waiting on it, so there is nobody to answer.
+	free := state(t, heldEvent(hold), releasedEvent(hold))
+
+	got := free.Expire(seat, hold)
+
+	if len(got.Events) != 0 || len(got.Replies) != 0 {
+		t.Fatalf("a timer for a hold that ended has nothing to say: %+v", got)
+	}
+}
+
+func TestAnExpiryDoesNotTouchASupersededHold(t *testing.T) {
+	// The token fence. hold-1's timer fires after hold-1 was released and the
+	// seat was taken by hold-2; expiring hold-2 here would free a seat someone
+	// is actively holding.
+	current := state(t, heldEvent(hold), releasedEvent(hold), heldEvent("hold-2"))
+
+	got := current.Expire(seat, hold)
+
+	if len(got.Events) != 0 || len(got.Replies) != 0 {
+		t.Fatalf("a stale timer must not disturb the live hold: %+v", got)
+	}
+}
+
+func TestHoldingASeatAsksForATimerAtTheDeadline(t *testing.T) {
+	free := inventory.SeatState{Version: 0, Status: inventory.StatusFree}
+
+	got := free.Hold(holdSeat(hold))
+
+	if len(got.Timers) != 1 {
+		t.Fatalf("a hold with a deadline asks for exactly one timer, got %d", len(got.Timers))
+	}
+	if !got.Timers[0].FireAt.Equal(expires.AsTime()) {
+		t.Fatalf("the timer must fire at the command's deadline: want %v, got %v",
+			expires.AsTime(), got.Timers[0].FireAt)
+	}
+	if got.Timers[0].Token != hold {
+		t.Fatalf("the token is the hold it expires: want %q, got %q", hold, got.Timers[0].Token)
+	}
+}
+
+func TestReAnnouncingAHoldAsksForNoSecondTimer(t *testing.T) {
+	// Timers accompany events, never replies. A re-dispatched HoldSeat for the
+	// hold that is already live changes nothing, and its timer already exists.
+	held := state(t, heldEvent(hold))
+
+	got := held.Hold(holdSeat(hold))
+
+	if len(got.Replies) != 1 || len(got.Events) != 0 {
+		t.Fatalf("setup: expected a bare re-announcement, got %+v", got)
+	}
+	if len(got.Timers) != 0 {
+		t.Fatalf("the timer was scheduled when the hold was taken, got %d more", len(got.Timers))
+	}
+}
+
+func TestAHoldWithNoDeadlineExpiresImmediately(t *testing.T) {
+	// A HoldSeat with no expires_at is malformed. Of the two ways to fail, the
+	// timer still gets scheduled — at the zero time, which is already past — so
+	// the seat is freed on the next pass and the saga is told. Refusing to
+	// schedule would instead produce the one thing this phase exists to prevent:
+	// a hold no clock will ever end.
+	free := inventory.SeatState{Version: 0, Status: inventory.StatusFree}
+
+	got := free.Hold(&inventoryv1.HoldSeat{HoldId: hold, BookingId: booking, SeatId: seat})
+
+	if len(got.Timers) != 1 {
+		t.Fatalf("a hold always gets a deadline, got %d timers", len(got.Timers))
+	}
+	if !got.Timers[0].FireAt.Before(time.Now()) {
+		t.Fatalf("a missing deadline is already past, got %v", got.Timers[0].FireAt)
 	}
 }

@@ -80,7 +80,8 @@ from design spec §13.
 | 3 | Contracts — protobuf, CloudEvents, schema registry framing | `contracts/`, `internal/platform/{envelope,codec,schema}` | **built** |
 | 4 | Outbox and inbox — claim-based poller, consume-once dedup | `internal/platform/{outbox,inbox,kafka}` | **built** |
 | 5a | Inventory — seat streams and holds | `internal/inventory` | **built** |
-| 5b | Seat-hold TTL timer and availability projection | — | not built |
+| 5b | Seat-hold TTL — a hold that expires with nobody alive to expire it | `internal/platform/timers`, `internal/inventory` | **built** |
+| 5c | Availability projection, wire.go, cmd/inventory | — | not built |
 | 6 | Hotel and payment, with the provider stub and idempotency keys | — | not built |
 | 7 | The saga — `Decide`, step timeouts, the compensation matrix | — | not built |
 | 8 | Booking API and its projection | — | not built |
@@ -136,6 +137,7 @@ terminal; there is nothing to install and nothing to run.
 | Event sourcing, optimistic concurrency | [internal/platform/eventstore](internal/platform/eventstore) | `go doc ./internal/platform/eventstore` |
 | Transactional outbox | [internal/platform/outbox](internal/platform/outbox) | `go doc ./internal/platform/outbox` |
 | Inbox, consume-once | [internal/platform/inbox](internal/platform/inbox) | `go doc ./internal/platform/inbox` |
+| Durable timers, self-expiring holds | [internal/platform/timers](internal/platform/timers) | `go doc ./internal/platform/timers` |
 | Kafka produce, consume, DLQ | [internal/platform/kafka](internal/platform/kafka) | `go doc ./internal/platform/kafka` |
 | CloudEvents envelope | [internal/platform/envelope](internal/platform/envelope) | `go doc ./internal/platform/envelope` |
 | Protobuf in Postgres | [internal/platform/codec](internal/platform/codec) | `go doc ./internal/platform/codec` |

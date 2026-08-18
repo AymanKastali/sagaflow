@@ -11,6 +11,7 @@ import (
 	"github.com/AymanKastali/sagaflow/internal/platform/inbox"
 	"github.com/AymanKastali/sagaflow/internal/platform/outbox"
 	"github.com/AymanKastali/sagaflow/internal/platform/pg"
+	"github.com/AymanKastali/sagaflow/internal/platform/timers"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/proto"
@@ -77,12 +78,15 @@ func (h *Handler) Handle(ctx context.Context, incoming envelope.Envelope, cmd pr
 // applyInOneTransaction handles a single command in a single database
 // transaction, which either commits all of its effects or none of them.
 //
-// Three things are written together and must not come apart: the events the
-// command produced, the outgoing messages announcing them, and the record that
-// this command was consumed. If the events committed but the messages did not,
-// the world would never hear about a hold that exists. If the consumed-record
-// committed but the events did not, redelivery would be ignored and the command
-// would be lost.
+// Four things are written together and must not come apart: the events the
+// command produced, the outgoing messages announcing them, any deadline those
+// events need, and the record that this command was consumed. If the events
+// committed but the messages did not, the world would never hear about a hold
+// that exists. If the consumed-record committed but the events did not,
+// redelivery would be ignored and the command would be lost. If the events
+// committed but the timer did not, the hold would exist with no deadline
+// attached — held forever, with nothing anywhere recording that anything went
+// wrong.
 //
 // It writes exactly one stream, never two. A stream's invariant is only
 // checkable within one transaction, so writing a second stream here would be
@@ -103,7 +107,7 @@ func (h *Handler) applyInOneTransaction(ctx context.Context, incoming envelope.E
 		if err != nil || !firstDelivery {
 			return err // not firstDelivery: already applied, commit nothing, ack
 		}
-		state, err := LoadSeat(ctx, tx, seatID)
+		state, _, err := LoadSeat(ctx, tx, seatID)
 		if err != nil {
 			return err
 		}
@@ -120,7 +124,19 @@ func (h *Handler) applyInOneTransaction(ctx context.Context, incoming envelope.E
 		if err := AppendSeat(ctx, tx, seatID, state.Version, decision.Events, meta); err != nil {
 			return err
 		}
-		msgs, err := h.messages(decision.Messages(), incoming, seatID)
+		if err := scheduleTimers(ctx, tx, seatID, decision.Timers); err != nil {
+			return err
+		}
+		// A reply keeps the incoming correlation id so the saga can route it, and
+		// takes the incoming ce_id as its causation, so the chain can be walked
+		// back message by message.
+		msgs, err := outgoing(h.enc, decision.Messages(), envelope.Envelope{
+			Source:        Source,
+			Subject:       seatID,
+			CorrelationID: incoming.CorrelationID,
+			CausationID:   incoming.ID,
+			TraceParent:   incoming.TraceParent,
+		})
 		if err != nil {
 			return err
 		}
@@ -128,33 +144,43 @@ func (h *Handler) applyInOneTransaction(ctx context.Context, incoming envelope.E
 	})
 }
 
-// messages frames each outgoing message and wraps it in its own envelope.
+// scheduleTimers records the decision's deadlines in the same transaction as the
+// events that need them.
 //
-// Each gets a new ce_id because each is a distinct message, keeps the
-// incoming correlation id so the saga can route the reply, and takes the
-// incoming ce_id as its causation id, so each outgoing message still names
-// the one that caused it and the chain can be walked back message by message.
-func (h *Handler) messages(msgs []proto.Message, in envelope.Envelope, seatID string) ([]envelope.Message, error) {
+// The deadline is passed through untouched rather than computed here. It came
+// from the command, which is what keeps the decision that produced it free of a
+// clock and testable without one.
+func scheduleTimers(ctx context.Context, tx pgx.Tx, seatID string, ts []Timer) error {
+	for _, t := range ts {
+		if err := timers.Schedule(ctx, tx, t.FireAt, seatID, t.Token); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// outgoing frames each message and wraps it in its own envelope, taking
+// everything but the id and the type from tmpl.
+//
+// Each message gets a new ce_id because each is a distinct message. The rest —
+// which flow it belongs to, what caused it, which seat it is about — is the
+// caller's to fill in, because a reply to a command and a hold that ran out of
+// time answer those questions differently.
+func outgoing(enc Encoder, msgs []proto.Message, tmpl envelope.Envelope) ([]envelope.Message, error) {
 	out := make([]envelope.Message, 0, len(msgs))
 	for _, m := range msgs {
-		payload, err := h.enc.Encode(m)
+		payload, err := enc.Encode(m)
 		if err != nil {
 			return nil, fmt.Errorf("inventory: frame %s: %w", codec.TypeName(m), err)
 		}
-		outgoing := envelope.Envelope{
-			ID:            envelope.NewID(),
-			Source:        Source,
-			Type:          codec.TypeName(m),
-			Subject:       seatID,
-			CorrelationID: in.CorrelationID,
-			CausationID:   in.ID,
-			TraceParent:   in.TraceParent,
-		}
+		e := tmpl
+		e.ID = envelope.NewID()
+		e.Type = codec.TypeName(m)
 		out = append(out, envelope.Message{
 			Topic:   EventsTopic,
-			Key:     seatID, // the stream id, which is what preserves per-seat ordering
+			Key:     e.Subject, // the stream id, which is what preserves per-seat ordering
 			Payload: payload,
-			Headers: outgoing.Headers(),
+			Headers: e.Headers(),
 		})
 	}
 	return out, nil
