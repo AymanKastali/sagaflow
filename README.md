@@ -136,6 +136,7 @@ terminal; there is nothing to install and nothing to run.
 | Event sourcing, optimistic concurrency | [internal/platform/eventstore](internal/platform/eventstore) | `go doc ./internal/platform/eventstore` |
 | Transactional outbox | [internal/platform/outbox](internal/platform/outbox) | `go doc ./internal/platform/outbox` |
 | Inbox, consume-once | [internal/platform/inbox](internal/platform/inbox) | `go doc ./internal/platform/inbox` |
+| Durable timers, self-expiring holds | [internal/platform/timers](internal/platform/timers) | `go doc ./internal/platform/timers` |
 | Kafka produce, consume, DLQ | [internal/platform/kafka](internal/platform/kafka) | `go doc ./internal/platform/kafka` |
 | CloudEvents envelope | [internal/platform/envelope](internal/platform/envelope) | `go doc ./internal/platform/envelope` |
 | Protobuf in Postgres | [internal/platform/codec](internal/platform/codec) | `go doc ./internal/platform/codec` |
