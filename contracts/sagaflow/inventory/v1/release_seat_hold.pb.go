@@ -21,9 +21,12 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// ReleaseSeatHold is the compensation for HoldSeat (spec §9.3). Compensations
-// retry forever, so it must be safe to apply to a seat that is already free:
-// inventory answers a released hold with SeatHoldReleased either way.
+// ReleaseSeatHold is the compensation for HoldSeat: it undoes a hold that a
+// later saga step made pointless.
+//
+// Compensations retry forever and never dead-letter, because a compensation
+// that gives up strands real inventory. So it must be safe to apply to a seat
+// that is already free: inventory answers with SeatHoldReleased either way.
 type ReleaseSeatHold struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	HoldId        string                 `protobuf:"bytes,1,opt,name=hold_id,json=holdId,proto3" json:"hold_id,omitempty"`

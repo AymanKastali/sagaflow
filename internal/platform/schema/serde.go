@@ -1,9 +1,3 @@
-// Package schema frames protobuf messages for the wire against a Confluent-
-// compatible registry, and pins the registry's compatibility level.
-//
-// It is separate from platform/kafka because it shares no symbol with the broker
-// plumbing: framing is about schema ids and message bytes, not about brokers,
-// partitions, or offsets.
 package schema
 
 import (
@@ -16,14 +10,18 @@ import (
 )
 
 // ErrSubjectNotRegistered means a schema this service needs is absent from the
-// registry. Services never auto-register (spec D14), so this is fatal at
-// startup rather than something to paper over at produce time.
+// registry. No producer in this system auto-registers a missing schema —
+// whoever hit that path first would silently become the one who defined the
+// contract — so an absent subject is fatal at startup rather than something
+// papered over the first time a message is produced.
 var ErrSubjectNotRegistered = errors.New("schema: subject not registered")
 
 // Subject implements TopicRecordNameStrategy: <topic>-<fully.qualified.Name>.
 //
-// The default TopicNameStrategy allows only one schema per topic, and our topics
-// carry several event types, so it would break on the second one (spec §8.3).
+// The registry's default strategy, TopicNameStrategy, keys a subject by topic
+// alone, which allows only one schema per topic. Our topics carry several
+// event types on purpose, so that default would break the moment a second
+// type needed to publish to the same topic.
 func Subject(topic, typeName string) string {
 	return topic + "-" + typeName
 }

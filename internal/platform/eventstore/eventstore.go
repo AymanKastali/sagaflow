@@ -1,8 +1,3 @@
-// Package eventstore is the append-only event log every service owns a copy of.
-//
-// It knows nothing about event payloads beyond "a type name and some JSON".
-// Encoding lives in platform/codec; folding events into state lives in each
-// service. This package's whole job is the version invariant.
 package eventstore
 
 import (
@@ -17,15 +12,16 @@ import (
 )
 
 // Meta travels with every event so a stored row can be traced back to the
-// request that caused it (spec §11).
+// request that caused it: the trace it was part of, the command it was
+// correlated with, and the specific event that caused it.
 type Meta struct {
 	TraceID       string `json:"trace_id,omitempty"`
 	CorrelationID string `json:"correlation_id,omitempty"`
 	CausationID   string `json:"causation_id,omitempty"`
 }
 
-// Event is an event about to be appended. Data is protojson bytes: readable in
-// psql and independent of the schema registry (spec §8.4).
+// Event is an event about to be appended. Data is protojson bytes: readable
+// directly in psql and decodable without consulting the schema registry.
 type Event struct {
 	Type string
 	Data []byte

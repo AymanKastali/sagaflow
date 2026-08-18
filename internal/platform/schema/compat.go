@@ -10,12 +10,12 @@ import (
 // EnsureBackwardCompatibility pins the registry's global compatibility level to
 // BACKWARD and confirms it took.
 //
-// This is the second of the three layers spec §8.3 asks for, sitting between `buf
-// breaking` in CI and a producer that fails closed on a missing schema id. It is
-// deliberately weaker than it sounds, and §8.3 is explicit about why: the registry
-// checks a schema when it is *registered*, not when a message is produced. Nothing
-// in an open-source Kafka can stop a determined producer from publishing arbitrary
-// bytes, so this is defence against mistakes, not against bypass.
+// This is the second of three layers of defence, sitting between `buf
+// breaking` in CI and a producer that fails closed on a missing schema id. It
+// is deliberately weaker than it sounds: the registry checks a schema when it
+// is *registered*, not when a message is produced. Nothing in an open-source
+// Kafka can stop a determined producer from publishing arbitrary bytes, so
+// this is defence against mistakes, not against bypass.
 //
 // The level is global rather than per-subject because subjects added in later
 // phases then inherit it with no extra call, and because setting a per-subject

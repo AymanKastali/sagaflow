@@ -55,8 +55,8 @@ func run(ctx context.Context, registry string) error {
 
 	// Pin compatibility before registering anything, so an incompatible change in
 	// this very run is rejected rather than accepted and enforced only next time.
-	// A registry defaults to NONE, which would quietly drop one of the three
-	// layers spec §8.3 asks for.
+	// A registry defaults to NONE, which would silently drop the one enforcement
+	// layer that runs at registration instead of at startup or on decode.
 	if err := schema.EnsureBackwardCompatibility(ctx, cl); err != nil {
 		return err
 	}

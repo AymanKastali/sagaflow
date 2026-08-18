@@ -18,8 +18,8 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// One registry for the whole package (spec §12.4). Starting one per test would
-// dominate the suite's runtime.
+// One registry for the whole package: starting one per test would dominate
+// the suite's runtime.
 //
 // No broker: framing is about schema ids and message bytes, so nothing here needs
 // one. That is the split platform/kafka and platform/schema exist to make.
@@ -163,7 +163,8 @@ func TestBackwardCompatibilityRejectsAFieldTypeChange(t *testing.T) {
 
 	// The assertion that matters is a rejected registration, not a config value
 	// read back. A registry left on its NONE default accepts this change happily,
-	// so this is what tells us layer two of spec §8.3 is actually switched on.
+	// so this is what tells us the registry's registration-time compatibility
+	// check is actually switched on.
 	text, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatalf("read %s: %v", file, err)

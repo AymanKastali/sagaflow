@@ -12,8 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// One container for the whole package (spec §12.4). Every integration test
-// package in this repository has a TestMain of exactly this shape.
+// One container for the whole package, started once and shared by every test,
+// rather than one per test — starting a container per test would make the
+// suite too slow to run routinely. Every integration test package in this
+// repository has a TestMain of exactly this shape.
 func TestMain(m *testing.M) {
 	stop, err := pgtest.Start()
 	if err != nil {

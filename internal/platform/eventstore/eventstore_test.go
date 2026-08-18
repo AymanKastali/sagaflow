@@ -18,8 +18,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// One container for the package, per spec §12.4. Isolation between tests comes
-// from the database name newDB is given, not from a fresh container.
+// One container for the package. Isolation between tests comes from the
+// database name newDB is given, not from a fresh container.
 func TestMain(m *testing.M) {
 	stop, err := pgtest.Start()
 	if err != nil {
@@ -242,8 +242,7 @@ func TestLoadReturnsEventsInVersionOrder(t *testing.T) {
 	}
 	// Semantic comparison, not byte comparison. JSONB is not a byte-preserving
 	// store: Postgres reparses and re-serialises, so {"k":"v"} comes back as
-	// {"k": "v"} and key order is not promised either. Spec §8.4 forbids
-	// comparing protojson byte-wise for precisely this reason — it is why the
+	// {"k": "v"} and key order is not promised either — which is why the
 	// stored form must never be hashed or used as a cache key.
 	var data map[string]string
 	if err := json.Unmarshal(got[0].Data, &data); err != nil {

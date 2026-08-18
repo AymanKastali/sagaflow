@@ -1,10 +1,3 @@
-// Package codec converts between generated protobuf messages and the rows the
-// event store holds.
-//
-// Storage is protojson, not protobuf bytes, for two reasons from spec §8.4: a
-// registry outage must not block replay, and psql must show something readable
-// during an incident. Wire framing for Kafka is a separate concern and lives in
-// platform/kafka.
 package codec
 
 import (
@@ -18,20 +11,25 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 )
 
-// ErrUnknownType means the event's type name is not in the generated registry.
-// It is a permanent technical failure — a message the consumer will never be
-// able to handle, so it dead-letters immediately rather than retrying (§10.2).
+// ErrUnknownType means the event's type name is not in the generated
+// registry. No amount of retrying adds a message type to a compiled binary's
+// registry, so this is a permanent failure rather than a transient one: the
+// caller dead-letters the message immediately instead of retrying it.
 var ErrUnknownType = errors.New("codec: unknown event type")
 
 // marshal uses proto field names so the stored JSON matches the .proto file
-// rather than lowerCamelCase. protojson output is not byte-stable across
-// library versions, so it must never be hashed or compared byte-wise (§8.4).
+// rather than lowerCamelCase. Its output is not byte-stable across protojson
+// library versions — a dependency bump can reorder fields or change
+// whitespace without changing what the JSON means — so stored JSON must never
+// be hashed, signed, or compared byte-for-byte, only decoded and compared as
+// values.
 var marshal = protojson.MarshalOptions{UseProtoNames: true}
 
-// unmarshal rejects unknown fields. A field present in the data but absent from
-// the compiled schema means the reader is older than the writer, which under the
-// BACKWARD compatibility rule in §8.3 should be impossible — so it is better to
-// fail loudly than to silently drop data during a replay.
+// unmarshal rejects unknown fields. A field present in the data but absent
+// from the compiled schema means the reader is older than the writer, which
+// the backward-compatibility discipline this system enforces is meant to
+// rule out, so it is better to fail loudly here than to silently drop data
+// during a replay.
 var unmarshal = protojson.UnmarshalOptions{DiscardUnknown: false}
 
 // TypeName is the fully qualified protobuf message name. It is simultaneously

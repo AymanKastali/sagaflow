@@ -15,12 +15,16 @@ import (
 )
 
 // ErrPermanent marks a handler error the message can never recover from — an
-// undecodable payload, an unknown event type. Wrap with it to route straight to
-// the DLQ with no retries (spec §10.2).
+// undecodable payload, an unknown event type. Waiting cannot fix either one,
+// so wrapping an error with ErrPermanent skips the retry budget entirely and
+// dead-letters the record immediately instead of spending that budget on
+// retries that were never going to succeed.
 var ErrPermanent = errors.New("permanent failure")
 
-// RebalanceTimeout must exceed the slowest handler transaction (spec §10.3),
-// otherwise a long-running handler has its partitions pulled mid-flight.
+// RebalanceTimeout must exceed the slowest handler transaction. With
+// BlockRebalanceOnPoll in effect, a pending rebalance is stuck behind
+// whatever the current batch is doing, so a timeout shorter than that work
+// pulls its partitions away before the handler can finish and mark them.
 const RebalanceTimeout = 60 * time.Second
 
 const (
@@ -31,7 +35,8 @@ const (
 	// attempts at DefaultBaseBackoff is roughly 1.5 s of backoff against 60 s.
 	DefaultMaxAttempts = 5
 	// DefaultBaseBackoff is the first retry delay; it doubles each attempt and
-	// carries jitter (spec §10.2).
+	// carries jitter, so a fleet of consumers retrying the same outage spreads
+	// out instead of retrying in lockstep.
 	DefaultBaseBackoff = 100 * time.Millisecond
 	// pollBatch bounds one poll. Records are handled one at a time regardless, so
 	// this only bounds how much work a single rebalance block covers.
@@ -53,7 +58,8 @@ type Record struct {
 // A returned error is retried with backoff up to MaxAttempts and then
 // dead-lettered; an error wrapping ErrPermanent skips the retries and
 // dead-letters immediately. Business outcomes are not errors — a handler that
-// decides "nothing to do" returns nil, per spec §10.2's retry policy.
+// decides "nothing to do" returns nil, because returning an error there would
+// retry and then dead-letter a message that was in fact handled correctly.
 type Handler func(ctx context.Context, r Record) error
 
 type ConsumerConfig struct {
@@ -176,7 +182,7 @@ func (c *Consumer) poll(ctx context.Context) (done bool) {
 // untouched: marking a later offset would advance the group past the unsettled
 // one, and MarkCommitRecords keeps the highest offset per partition and cannot
 // rewind. Other partitions keep flowing, so one stuck stream does not stop the
-// others (spec §10.2).
+// others.
 func (c *Consumer) handleBatch(ctx context.Context, fetches kgo.Fetches) {
 	stalled := make(map[topicPartition]bool)
 	fetches.EachRecord(func(kr *kgo.Record) {
@@ -248,8 +254,8 @@ func (c *Consumer) attempt(ctx context.Context, r Record) error {
 	}
 }
 
-// backoff is the wait before attempt n+1: bounded exponential with jitter (spec
-// §10.2). Each wait is uniform in [d, 2·d), so a fleet of consumers retrying the
+// backoff is the wait before attempt n+1: bounded exponential with jitter.
+// Each wait is uniform in [d, 2·d), so a fleet of consumers retrying the
 // same downstream outage spreads out instead of retrying in lockstep.
 func backoff(base time.Duration, attempt int) time.Duration {
 	d := int64(base << (attempt - 1))

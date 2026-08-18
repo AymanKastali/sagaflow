@@ -1,9 +1,3 @@
-// Package srtest starts an Apicurio Registry for integration tests.
-//
-// The URL it returns already includes the Confluent-compatibility path prefix,
-// because that is the single most common way to waste an hour here: Apicurio
-// serves the Confluent-shaped API under /apis/ccompat/v7, not at the root, and a
-// client pointed at the bare host gets 404 on every call (spec §8.5).
 package srtest
 
 import (
@@ -46,7 +40,9 @@ func Shared(t *testing.T) *Registry {
 }
 
 // Start brings up the package's registry and returns a stop function. Call it
-// from TestMain, exactly as with pgtest.Start (spec §12.4).
+// from TestMain, exactly as with pgtest.Start: one container per package,
+// brought up once before any test runs, so the startup cost is paid once
+// rather than once per test.
 //
 // One registry per package means tests share subjects, so a test that needs an
 // *unregistered* subject asks about a topic no other test registers rather than

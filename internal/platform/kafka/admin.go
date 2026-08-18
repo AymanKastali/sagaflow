@@ -10,9 +10,9 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-// Partitions is the partition count for every topic in the system (spec §10.3).
-// It bounds consumer parallelism; per-stream ordering is preserved regardless
-// because the record key is always the stream id.
+// Partitions is the partition count for every topic in the system. It bounds
+// consumer parallelism; per-stream ordering is preserved regardless because
+// the record key is always the stream id.
 const Partitions int32 = 6
 
 // EnsureTopics creates topics if they are absent and succeeds if they exist.

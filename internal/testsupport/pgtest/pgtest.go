@@ -1,13 +1,3 @@
-// Package pgtest starts one Postgres container per test package and hands out
-// independent databases inside it.
-//
-// One container per package, started in TestMain, is spec §12.4: container
-// startup dominates test time, and isolation comes from separate databases named
-// after the test rather than from fresh containers. Separate databases also
-// preserve the property that no transaction can span two services.
-//
-// There is intentionally no exported function that starts a container for a
-// single test. A container per test is the mistake this API exists to prevent.
 package pgtest
 
 import (

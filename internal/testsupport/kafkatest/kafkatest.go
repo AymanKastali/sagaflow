@@ -1,11 +1,3 @@
-// Package kafkatest starts a real apache/kafka broker for integration tests.
-//
-// It does not use testcontainers-go/modules/kafka: that module's startup script
-// sources /etc/confluent/docker/bash-config and execs /etc/confluent/docker/launch,
-// paths that exist only in confluentinc/confluent-local — whose default tag is a
-// Kafka 3.5-era broker under the Confluent Community License. Testing against a
-// different broker major than production runs is exactly the gap the offset and
-// rebalance behaviour in this system cannot afford.
 package kafkatest
 
 import (
@@ -21,6 +13,15 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
+// Image is the broker every test in the module runs against.
+//
+// It is apache/kafka rather than testcontainers-go/modules/kafka. That module's
+// startup script sources /etc/confluent/docker/bash-config and execs
+// /etc/confluent/docker/launch, paths that exist only in
+// confluentinc/confluent-local — whose default tag is a Kafka 3.5-era broker
+// under the Confluent Community License. Testing against a different broker
+// major than production runs is exactly the gap the offset and rebalance
+// behaviour in this system cannot afford.
 const Image = "apache/kafka:4.3.1"
 
 // startGate is the file the container blocks on before booting Kafka. See
