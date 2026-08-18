@@ -1,6 +1,3 @@
-// Package pg holds Postgres plumbing shared by every service: pool
-// construction, the transaction helper every handler runs inside, and the
-// migration runner.
 package pg
 
 import (
