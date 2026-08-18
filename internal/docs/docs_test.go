@@ -61,6 +61,7 @@ var exemptFromChapter = map[string]string{
 var exemptEntirely = map[string]string{
 	"internal/integration": "test-only package, declares package integration_test",
 	"internal/toolchain":   "test-only package, guards the Go version floor",
+	"internal/docs":        "test-only package; this is the enforcement itself",
 }
 
 // pkg is one Go package found on disk.
@@ -146,11 +147,18 @@ func packageComment(t *testing.T, path string) string {
 // that says what it is.
 func TestEveryPackageIsDocumented(t *testing.T) {
 	for _, p := range findPackages(t) {
-		if _, ok := exemptEntirely[p.path]; ok {
-			continue
-		}
 		if len(p.goFiles) == 0 {
-			continue // test-only, and not on the exempt list: nothing to document
+			// A test-only package cannot hold a doc.go: Go forbids a non-_test.go
+			// file from declaring an external test package. It still has to be a
+			// named decision, so an unlisted one fails here rather than passing
+			// invisibly.
+			if _, ok := exemptEntirely[p.path]; !ok {
+				t.Errorf("%s: rule D1 — test-only package is not on the exempt list.\n"+
+					"It cannot have a doc.go, so add it to exemptEntirely with a reason. "+
+					"Skipping it silently would let any future test-only package escape "+
+					"every check without anyone deciding that it should.", p.path)
+			}
+			continue
 		}
 		var documented bool
 		for _, name := range p.goFiles {
@@ -288,18 +296,50 @@ func TestReadmeLinksEveryPlatformPackage(t *testing.T) {
 	}
 }
 
+// TestReadmeMapListsEveryInternalDirectory keeps the repository map honest.
+//
+// The map in README.md reads as an enumeration of internal/, so an omission is a
+// factual error rather than an editorial trim — a reader counts six entries and
+// concludes there are six. It has already gone stale twice: once for
+// internal/toolchain, once for internal/docs. Hence a test rather than a habit.
+func TestReadmeMapListsEveryInternalDirectory(t *testing.T) {
+	readme, err := os.ReadFile(filepath.Join(repoRoot, "README.md"))
+	if err != nil {
+		t.Fatalf("reading README.md: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(repoRoot, "internal"))
+	if err != nil {
+		t.Fatalf("reading internal: %v", err)
+	}
+	var checked int
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		checked++
+		if !strings.Contains(string(readme), "  "+e.Name()+"/") {
+			t.Errorf("README.md: the repository map does not list internal/%s.\n"+
+				"The map reads as an enumeration, so an omission tells the reader "+
+				"something false about what is in the tree.", e.Name())
+		}
+	}
+	if checked == 0 {
+		t.Fatal("found no directories under internal — this check passed vacuously")
+	}
+}
+
 // conceptBearing reports whether a package must carry a full chapter.
 //
 // Everything with real code does, except the two exempt lists. Defaulting to
 // "yes" is deliberate: a package added later is included automatically, and
 // excluding it takes a visible edit to exemptFromChapter with a reason.
 func conceptBearing(p pkg) bool {
-	if _, ok := exemptEntirely[p.path]; ok {
-		return false
-	}
 	if _, ok := exemptFromChapter[p.path]; ok {
 		return false
 	}
+	// Test-only packages are handled by D1, which requires them to be listed in
+	// exemptEntirely. They cannot carry a chapter, so they are not concept-bearing
+	// here regardless.
 	return len(p.goFiles) > 0
 }
 

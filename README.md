@@ -171,6 +171,7 @@ internal/
   testsupport/             container fixtures for tests
   integration/             tests that need more than one service
   toolchain/               a test that fails if the Go version floor slips
+  docs/                    a test that fails if a package skips its chapter
 docs/
   conventions.md           how code and docs are written here
   glossary.md              every domain term, defined once
