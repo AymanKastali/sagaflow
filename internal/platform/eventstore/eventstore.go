@@ -132,3 +132,39 @@ func Load(ctx context.Context, tx pgx.Tx, streamID string) ([]Recorded, error) {
 	}
 	return out, nil
 }
+
+const streamsSQL = `SELECT DISTINCT stream_id FROM events ORDER BY stream_id`
+
+// Streams names every stream in the database, so a projection can be rebuilt by
+// folding each one from scratch.
+//
+// Enumerating streams is what makes a rebuild safe, and the alternative is the
+// trap this table is shaped to avoid. Row ids are handed out at insert but become
+// visible at commit, so a rebuild that remembered "I have read up to id 42" would
+// step straight over a row that took id 41 and committed later — losing an event
+// silently, only under load. Folding a whole stream reads every version of it or
+// fails; there is no cursor for anything to slip behind.
+//
+// It reads inside the caller's transaction, like Load, so a rebuild sees one
+// consistent snapshot: the streams it enumerates and the events it then folds are
+// the same log, not two reads of a moving one.
+func Streams(ctx context.Context, tx pgx.Tx) ([]string, error) {
+	rows, err := tx.Query(ctx, streamsSQL)
+	if err != nil {
+		return nil, fmt.Errorf("eventstore: list streams: %w", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("eventstore: scan stream id: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("eventstore: iterate stream ids: %w", err)
+	}
+	return out, nil
+}

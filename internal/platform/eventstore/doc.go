@@ -84,7 +84,7 @@
 //
 // # Reading order
 //
-//	eventstore.go  Append and Load. Start with Append's SQL.
+//	eventstore.go  Append, Load and Streams. Start with Append's SQL.
 //	errors.go      ErrVersionConflict, and the Postgres code it is mapped from.
 //
 // # Where this comes from
