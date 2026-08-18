@@ -459,6 +459,62 @@ grep -n 'kafka\.' cmd/schemactl/main.go
 
 If there are no matches, remove the `platform/kafka` import.
 
+- [ ] **Step 4b: Split the `TestMain` that moved with serde_test.go**
+
+*Added during execution — the plan missed it.* `serde_test.go` held the whole `kafka` package's `TestMain`, so moving the file left `kafka` with no broker and every one of its tests failing on `kafkatest: no broker running`.
+
+The split is cleaner than what was there: the combined `TestMain` started a registry **and** a broker for every test in the package, and neither half needed both. `schema` tests call only `srtest.Shared`; `kafka` tests call only `kafkatest.Shared`.
+
+Create `internal/platform/kafka/main_test.go`:
+
+```go
+package kafka_test
+
+import (
+	"fmt"
+	"os"
+	"testing"
+
+	"github.com/kptac/sagaflow/internal/platform/kafkatest"
+)
+
+// One broker for the whole package (spec §12.4). Isolation comes from topic names
+// and consumer groups derived from the test, not from a container per test.
+//
+// This package needs no registry: framing against one is platform/schema's job,
+// and these tests only produce and consume bytes.
+func TestMain(m *testing.M) {
+	stop, err := kafkatest.Start()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	code := m.Run()
+	stop()
+	os.Exit(code)
+}
+```
+
+In `internal/platform/schema/serde_test.go`, narrow the moved `TestMain` to the registry alone and drop its `kafkatest` import:
+
+```go
+// One registry for the whole package (spec §12.4). Starting one per test would
+// dominate the suite's runtime.
+//
+// No broker: framing is about schema ids and message bytes, so nothing here needs
+// one. That is the split platform/kafka and platform/schema exist to make.
+func TestMain(m *testing.M) {
+	stop, err := srtest.Start()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	code := m.Run()
+	stop()
+	os.Exit(code)
+}
+```
+
 - [ ] **Step 5: Verify and run the suite**
 
 ```bash

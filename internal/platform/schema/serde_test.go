@@ -1,4 +1,4 @@
-package kafka_test
+package schema_test
 
 import (
 	"context"
@@ -11,32 +11,26 @@ import (
 	"time"
 
 	inventoryv1 "github.com/kptac/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
-	"github.com/kptac/sagaflow/internal/platform/kafka"
-	"github.com/kptac/sagaflow/internal/platform/kafkatest"
+	"github.com/kptac/sagaflow/internal/platform/schema"
 	"github.com/kptac/sagaflow/internal/platform/srtest"
 	"github.com/twmb/franz-go/pkg/sr"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// One registry and one broker for the whole package (spec §12.4): the serde tests
-// need the registry, the producer and consumer tests need the broker, and starting
-// either per test would dominate the suite's runtime.
+// One registry for the whole package (spec §12.4). Starting one per test would
+// dominate the suite's runtime.
+//
+// No broker: framing is about schema ids and message bytes, so nothing here needs
+// one. That is the split platform/kafka and platform/schema exist to make.
 func TestMain(m *testing.M) {
-	stopRegistry, err := srtest.Start()
+	stop, err := srtest.Start()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	stopKafka, err := kafkatest.Start()
-	if err != nil {
-		stopRegistry()
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	code := m.Run()
-	stopKafka()
-	stopRegistry()
+	stop()
 	os.Exit(code)
 }
 
@@ -100,7 +94,7 @@ func register(t *testing.T, cl *sr.Client, topic, protoFile string, msg proto.Me
 	if err != nil {
 		t.Fatalf("read %s: %v", protoFile, err)
 	}
-	subject := kafka.Subject(topic, string(msg.ProtoReflect().Descriptor().FullName()))
+	subject := schema.Subject(topic, string(msg.ProtoReflect().Descriptor().FullName()))
 	if _, err := cl.CreateSchema(context.Background(), subject, sr.Schema{
 		Schema: string(text),
 		Type:   sr.TypeProtobuf,
@@ -110,7 +104,7 @@ func register(t *testing.T, cl *sr.Client, topic, protoFile string, msg proto.Me
 }
 
 func TestSubjectUsesTopicRecordNameStrategy(t *testing.T) {
-	got := kafka.Subject("inventory.events", "sagaflow.inventory.v1.SeatHeld")
+	got := schema.Subject("inventory.events", "sagaflow.inventory.v1.SeatHeld")
 	const want = "inventory.events-sagaflow.inventory.v1.SeatHeld"
 	if got != want {
 		t.Fatalf("want %q, got %q", want, got)
@@ -122,7 +116,7 @@ func TestSerdeRoundTripsThroughConfluentFraming(t *testing.T) {
 	cl := client(t, srtest.Shared(t).URL())
 	register(t, cl, topic, "../../../proto/sagaflow/inventory/v1/events.proto", &inventoryv1.SeatHeld{})
 
-	s, err := kafka.NewTopicSerde(ctx, cl, topic, &inventoryv1.SeatHeld{})
+	s, err := schema.NewTopicSerde(ctx, cl, topic, &inventoryv1.SeatHeld{})
 	if err != nil {
 		t.Fatalf("new serde: %v", err)
 	}
@@ -138,7 +132,7 @@ func TestSerdeRoundTripsThroughConfluentFraming(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	ss, err := cl.SchemaByVersion(ctx, kafka.Subject(topic, "sagaflow.inventory.v1.SeatHeld"), latestVersion)
+	ss, err := cl.SchemaByVersion(ctx, schema.Subject(topic, "sagaflow.inventory.v1.SeatHeld"), latestVersion)
 	if err != nil {
 		t.Fatalf("look up the registered id: %v", err)
 	}
@@ -163,7 +157,7 @@ func TestBackwardCompatibilityRejectsAFieldTypeChange(t *testing.T) {
 	const file = "../../../proto/sagaflow/inventory/v1/events.proto"
 	register(t, cl, topic, file, &inventoryv1.SeatHeld{})
 
-	if err := kafka.EnsureBackwardCompatibility(ctx, cl); err != nil {
+	if err := schema.EnsureBackwardCompatibility(ctx, cl); err != nil {
 		t.Fatalf("ensure backward compatibility: %v", err)
 	}
 
@@ -179,7 +173,7 @@ func TestBackwardCompatibilityRejectsAFieldTypeChange(t *testing.T) {
 		t.Fatal("the field this test mutates has been renamed; update the test")
 	}
 
-	subject := kafka.Subject(topic, "sagaflow.inventory.v1.SeatHeld")
+	subject := schema.Subject(topic, "sagaflow.inventory.v1.SeatHeld")
 	if _, err := cl.CreateSchema(ctx, subject, sr.Schema{
 		Schema: incompatible,
 		Type:   sr.TypeProtobuf,
@@ -197,8 +191,8 @@ func TestNewTopicSerdeFailsClosedOnUnregisteredSubject(t *testing.T) {
 	// subject is derived from the topic, so this is an unregistered subject on a
 	// registry that is otherwise healthy and populated — which is the situation a
 	// misconfigured service actually meets.
-	_, err := kafka.NewTopicSerde(ctx, cl, "inventory.events.typo", &inventoryv1.SeatHeld{})
-	if !errors.Is(err, kafka.ErrSubjectNotRegistered) {
+	_, err := schema.NewTopicSerde(ctx, cl, "inventory.events.typo", &inventoryv1.SeatHeld{})
+	if !errors.Is(err, schema.ErrSubjectNotRegistered) {
 		t.Fatalf("want ErrSubjectNotRegistered, got %v", err)
 	}
 }
