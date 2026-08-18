@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package sagaflow.inventory.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// SeatHeld records that one specific seat is held for one booking until
+// expires_at. The stream is the seat, so this event is the whole invariant:
+// a seat holds at most one live hold at a time.
+message SeatHeld {
+  string hold_id = 1;
+  string booking_id = 2;
+  string seat_id = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}

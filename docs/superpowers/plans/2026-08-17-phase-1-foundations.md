@@ -18,7 +18,7 @@
 
 Copied verbatim from spec §5 and §3. Every task's requirements implicitly include this section.
 
-- **Go 1.26.6.** The environment currently has 1.26.5 — Task 1 upgrades it. `go.mod` declares `go 1.26.6`.
+- **Go 1.26.6.** `go.mod` declares `go 1.26.6`; with `GOTOOLCHAIN=auto` the go command fetches that toolchain itself, so the installed go may be older and no machine-level upgrade is required.
 - **Module path:** `github.com/kptac/sagaflow`. One module at the repository root.
 - **Pinned images, never `latest`:** `apache/kafka:4.3.1`, `postgres:18.6`, `apicurio/apicurio-registry:3.3.1`, `cr.jaegertracing.io/jaegertracing/jaeger:2.20.0`.
 - **Pinned Go dependencies** (spec §5): franz-go v1.21.6, `franz-go/pkg/sr` v1.8.0, `franz-go/pkg/kadm` v1.18.0, pgx/v5 v5.10.0, tern/v2 v2.4.2, google/uuid v1.6.0, protobuf v1.36.12, otel + otel/sdk v1.45.0, testcontainers-go v0.44.0. **Add no dependency not listed in §5.**
@@ -71,13 +71,15 @@ Both expose the same two-function shape — `Start()` for `TestMain` and `Shared
 - Consumes: nothing.
 - Produces: a module at `github.com/kptac/sagaflow` on Go 1.26.6; `make test` runs unit tests; `go tool buf` and `go tool protoc-gen-go` resolve at pinned versions.
 
-- [ ] **Step 1: Upgrade Go to 1.26.6 and confirm**
+- [ ] **Step 1: Confirm the toolchain can reach 1.26.6 — do not install anything**
 
 ```bash
-go version   # if this prints go1.26.5, install 1.26.6 first
+go env GOTOOLCHAIN   # expect: auto
 ```
 
-Install via your platform's usual route, then re-run. Expected: `go version go1.26.6 <os>/<arch>`. Do not continue on 1.26.5 — `go.mod` declares 1.26.6 and the build will refuse.
+With `GOTOOLCHAIN=auto` (the default since Go 1.21), the `go 1.26.6` directive this task writes into `go.mod` is self-fulfilling: the go command downloads the `go1.26.6` toolchain into the module cache and re-execs into it. The installed go can be older — here it is `go1.26.5` — and every build, test and `go tool` invocation still runs under 1.26.6. Nothing outside the repository changes, which is the point: a plan should not require a developer to re-provision their machine to build the project.
+
+If `GOTOOLCHAIN` is anything other than `auto` or `local+auto`, either unset it for this repository or install 1.26.6 through your usual route; do not lower the `go` directive to match an older toolchain, because that silently changes the language version the whole module compiles against.
 
 - [ ] **Step 2: Initialise the module and pin every dependency**
 
@@ -111,7 +113,17 @@ go tool buf --version          # expect 1.72.0
 go tool protoc-gen-go --version # expect v1.36.12
 ```
 
-If the `go` directive reads `go 1.26.5`, edit it to `go 1.26.6`.
+If the `go` directive reads anything other than `go 1.26.6`, fix it with `go mod edit -go=1.26.6`. Do this *before* the `go get` calls in Step 2, so they too run under the pinned toolchain.
+
+**Do not run `go mod tidy` until Phase 4b is complete.** Nothing imports the eleven libraries yet, so `go get` records them all as `// indirect` and `tidy` would delete every one of them — undoing this task. The versions are still reproducible in the meantime: they are recorded in `go.mod` and hashed in `go.sum`, so module resolution selects them regardless of the `indirect` marker, and each becomes a direct requirement as the phase that needs it lands. The two `tool` entries are unaffected — the `tool` directive is itself the thing that keeps them.
+
+The same cause produces one recurring symptom, so expect it rather than debugging it each time: the first task to import a *sub-package* may fail with `missing go.sum entry for module providing package …`. `go get` at module granularity only records sums for what the build graph needed at the time, and a sub-package can pull a transitive module the root did not — `pgx/v5/pgxpool` needs `jackc/puddle/v2`, for instance. Fix it by naming the sub-package at its pinned version, never by tidying:
+
+```bash
+go get github.com/jackc/pgx/v5/pgxpool@v5.10.0
+```
+
+That adds the missing sums and leaves the selected versions untouched, which `go list -m` will confirm.
 
 - [ ] **Step 4: Write `.gitignore`**
 
@@ -136,12 +148,17 @@ down:
 generate:
 	go tool buf generate
 
+# go vet runs first and always. buf lint is skipped, loudly, until contracts
+# exist (Phase 3a) -- buf fails outright on a module with no .proto files, and a
+# lint target that cannot be run is a lint target nobody runs.
 lint:
-	go tool buf lint
 	go vet ./...
+	@if [ -f buf.yaml ]; then go tool buf lint; \
+	else echo "lint: skipping buf lint -- no buf.yaml yet (arrives in Phase 3a)"; fi
 
 breaking:
-	go tool buf breaking --against '.git#branch=main'
+	@if [ -f buf.yaml ]; then go tool buf breaking --against '.git#branch=main'; \
+	else echo "breaking: skipping -- no buf.yaml yet (arrives in Phase 3a)"; fi
 
 schemas-register:
 	go run ./cmd/schemactl -registry http://localhost:8080/apis/ccompat/v7
@@ -163,21 +180,64 @@ Create `internal/platform/version/version_test.go`:
 package version
 
 import (
+	"go/version"
 	"runtime"
-	"strings"
 	"testing"
 )
 
-func TestGoVersionIsAtLeast1_26_6(t *testing.T) {
+// Minimum is the toolchain floor spec §5 pins. It matches the `go` directive in
+// go.mod, which is what actually causes the toolchain to be fetched.
+const Minimum = "go1.26.6"
+
+// meetsFloor reports whether a Go release version is at least Minimum.
+//
+// go/version.Compare understands Go's release ordering, including that go1.26.10
+// is newer than go1.26.9 — which string comparison gets wrong.
+func meetsFloor(v string) bool {
+	return version.Compare(v, Minimum) >= 0
+}
+
+// TestToolchainMeetsTheFloor guards the pin for the build actually running.
+func TestToolchainMeetsTheFloor(t *testing.T) {
 	got := runtime.Version()
-	if !strings.HasPrefix(got, "go1.26.") {
-		t.Fatalf("built with %s, want go1.26.x — see Global Constraints", got)
+	if !version.IsValid(got) {
+		// Devel and gccgo builds report versions Compare cannot order; say so
+		// rather than failing on something this test cannot judge.
+		t.Skipf("runtime.Version() = %q is not a comparable release version", got)
 	}
-	if got == "go1.26.5" {
-		t.Fatalf("built with %s, want go1.26.6 or newer", got)
+	if !meetsFloor(got) {
+		t.Fatalf("built with %s, want %s or newer — see Global Constraints; "+
+			"GOTOOLCHAIN=auto should fetch it from the go.mod directive", got, Minimum)
+	}
+}
+
+// TestFloorRejectsOlderReleases proves the guard has teeth.
+//
+// Without this, TestToolchainMeetsTheFloor is a test whose only observed outcome
+// is "pass" — it would look identical if the comparison were inverted or the
+// floor were unreachable. This pins the rejection behaviour without needing an
+// older toolchain installed to demonstrate it.
+func TestFloorRejectsOlderReleases(t *testing.T) {
+	for _, tc := range []struct {
+		v    string
+		want bool
+	}{
+		{"go1.25.13", false}, // previous minor, however high its patch
+		{"go1.26.4", false},
+		{"go1.26.5", false}, // what was installed when this was written
+		{"go1.26.6", true},  // the floor itself
+		{"go1.26.7", true},
+		{"go1.26.10", true}, // string comparison would call this older than 1.26.6
+		{"go1.27.0", true},
+	} {
+		if got := meetsFloor(tc.v); got != tc.want {
+			t.Errorf("meetsFloor(%q) = %v, want %v", tc.v, got, tc.want)
+		}
 	}
 }
 ```
+
+A one-line "reject exactly go1.26.5" check would have been worse than nothing: it reads like a floor, passes on go1.26.4, and its only observable outcome is success. The table is what makes the guard falsifiable.
 
 - [ ] **Step 7: Run it**
 
@@ -276,7 +336,13 @@ services:
     image: apicurio/apicurio-registry:3.3.1
     ports: ["8080:8080"]
     environment:
-      APICURIO_STORAGE_KIND: mem
+      # Apicurio 3.x has no "mem" storage kind — that was a separate 2.x image
+      # (apicurio-registry-mem), and RegistryStorageProducer in 3.3.1 accepts
+      # only sql, kafkasql, gitops and kubernetesops. The ephemeral dev store is
+      # sql over in-memory H2, which is 3.x's default; it is set explicitly here
+      # so the storage a local registry uses is visible rather than inherited.
+      APICURIO_STORAGE_KIND: sql
+      APICURIO_STORAGE_SQL_KIND: h2
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/apis/registry/v3/system/info || exit 1"]
       interval: 5s
@@ -353,8 +419,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 
@@ -433,8 +499,9 @@ func Shared(t *testing.T) *PG {
 	return shared
 }
 
-// DSN creates dbName on first request and returns a DSN pointing at it. Name the
-// database after the test so tests in one package cannot collide.
+// DSN creates dbName for the calling test and returns a DSN pointing at it. Name
+// the database after the test so tests in one package cannot collide. Calling it
+// more than once within one test returns the same database.
 func (p *PG) DSN(t *testing.T, dbName string) string {
 	t.Helper()
 	p.mu.Lock()
@@ -447,23 +514,51 @@ func (p *PG) DSN(t *testing.T, dbName string) string {
 			t.Fatalf("connect admin: %v", err)
 		}
 		defer conn.Close(ctx)
-		if _, err := conn.Exec(ctx, fmt.Sprintf("CREATE DATABASE %q", dbName)); err != nil {
+		// CREATE DATABASE takes no parameters, so the name has to be
+		// interpolated. pgx.Identifier does the quoting and escaping; fmt's %q
+		// only looks right because Go and SQL happen to share the double quote.
+		name := pgx.Identifier{dbName}.Sanitize()
+		// Drop first. Database names come from test names, so `go test -count=2`
+		// asks for the same name twice in one process; without this the second run
+		// inherits the first run's rows and fails on counts and version conflicts
+		// that have nothing to do with the code under test. FORCE so a leaked
+		// connection cannot wedge the whole suite.
+		if _, err := conn.Exec(ctx, "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)"); err != nil {
+			t.Fatalf("drop stale database %s: %v", dbName, err)
+		}
+		if _, err := conn.Exec(ctx, "CREATE DATABASE "+name); err != nil {
 			t.Fatalf("create database %s: %v", dbName, err)
 		}
 		p.created[dbName] = true
+		// Forget the name when this test ends, so a repeat run recreates it rather
+		// than reusing it. Cleanups run last-in-first-out, so the test's own pool
+		// has already been closed by the time this runs.
+		t.Cleanup(func() {
+			p.mu.Lock()
+			delete(p.created, dbName)
+			p.mu.Unlock()
+		})
 	}
-	return replaceDBName(p.baseDSN, dbName)
+	dsn, err := replaceDBName(p.baseDSN, dbName)
+	if err != nil {
+		t.Fatalf("build dsn for %s: %v", dbName, err)
+	}
+	return dsn
 }
 
-// replaceDBName swaps the database out of a
-// postgres://user:pass@host:port/postgres?sslmode=disable DSN.
-func replaceDBName(dsn, dbName string) string {
-	base, query, hadQuery := strings.Cut(dsn, "?")
-	base = base[:strings.LastIndexByte(base, '/')+1] + dbName
-	if hadQuery {
-		return base + "?" + query
+// replaceDBName points a DSN at a different database, preserving everything else
+// including the query string.
+//
+// Parsed rather than sliced at the last '/': a password or host containing a
+// slash would send an index-based rewrite to the wrong place, and this helper's
+// output is what every integration test connects through.
+func replaceDBName(dsn, dbName string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "", fmt.Errorf("parse dsn: %w", err)
 	}
-	return base
+	u.Path = "/" + dbName
+	return u.String(), nil
 }
 ```
 
@@ -764,7 +859,12 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestContainerRunsKafka431AndRoundTrips(t *testing.T) {
+// The broker being 4.3.1 is guaranteed by the pinned Image constant at container
+// creation (spec D16), not asserted here — a runtime version check would either
+// be tautological or rest on inferring a release from its supported API
+// versions. What this test proves is that the gated boot produced a broker the
+// host can actually reach and round-trip against.
+func TestSharedBrokerRoundTrips(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	brokers := kafkatest.Shared(t).Brokers()
@@ -952,8 +1052,16 @@ func Start() (stop func(), err error) {
 
 	// Open the gate. The broker now boots advertising the host-mapped address —
 	// a value it never has to change afterwards.
+	//
+	// Written to a temporary path and renamed into place, because `> file`
+	// creates and truncates before printf writes anything. The waiting shell
+	// tests only for existence, so an in-place write leaves a window — narrow,
+	// but real — where it sees the file, cats it empty, and boots the broker with
+	// no advertised listener at all. rename(2) is atomic within a filesystem, so
+	// the gate either does not exist or holds the whole value.
 	code, out, err := ctr.Exec(ctx, []string{"/bin/sh", "-c", fmt.Sprintf(
-		"printf '%%s' 'PLAINTEXT://%s,BROKER://localhost:19092' > %s", broker, startGate)})
+		"printf '%%s' 'PLAINTEXT://%s,BROKER://localhost:19092' > %s.tmp && mv %s.tmp %s",
+		broker, startGate, startGate, startGate)}
 	if err != nil || code != 0 {
 		buf := make([]byte, 4096)
 		n, _ := out.Read(buf)
@@ -986,14 +1094,17 @@ func waitForBroker(ctx context.Context, broker string, timeout time.Duration) er
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	var last error
+	// One client for the whole wait. franz-go retries metadata internally and a
+	// failed Ping leaves it usable, so rebuilding it each attempt would spawn and
+	// tear down goroutines hundreds of times to learn nothing extra.
+	cl, err := kgo.NewClient(kgo.SeedBrokers(broker))
+	if err != nil {
+		return fmt.Errorf("kafkatest: client for %s: %w", broker, err)
+	}
+	defer cl.Close()
+
 	for {
-		cl, err := kgo.NewClient(kgo.SeedBrokers(broker))
-		if err != nil {
-			return fmt.Errorf("kafkatest: client for %s: %w", broker, err)
-		}
-		last = cl.Ping(ctx)
-		cl.Close()
+		last := cl.Ping(ctx)
 		if last == nil {
 			return nil
 		}

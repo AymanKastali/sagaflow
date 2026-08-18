@@ -12,7 +12,7 @@
 
 **Plan sequence:** this is plan 4 of 6. See [README.md](README.md). **Depends on Phase 3a** (generated types, `codec.TypeName`). Phase 4b depends on this one for the producer and consumer serde.
 
-**Deliverable that ends this phase:** `make schemas-register` registers both subjects with a real Apicurio, a serde built afterwards encodes and decodes a `SeatHeld` through Confluent framing, and a serde built against an *unregistered* subject fails to construct rather than silently defining the contract.
+**Deliverable that ends this phase:** `make schemas-register` pins the registry to `BACKWARD` and registers both subjects with a real Apicurio, a serde built afterwards encodes and decodes a `SeatHeld` through Confluent framing, a serde built against an *unregistered* subject fails to construct rather than silently defining the contract, and an incompatible schema change is rejected by the registry rather than accepted.
 
 ## Global Constraints
 
@@ -38,7 +38,8 @@ Copied verbatim from spec §5 and §3. Every task's requirements implicitly incl
 | `internal/platform/envelope/envelope_test.go` | Round-trip, missing attributes, prefix correctness |
 | `internal/platform/srtest/srtest.go` | `apicurio/apicurio-registry:3.3.1` container for tests |
 | `internal/platform/kafka/serde.go` | `Subject`, `NewTopicSerde`, Confluent framing over protobuf |
-| `internal/platform/kafka/serde_test.go` | Encode/decode round trip, fail-closed on unregistered subject |
+| `internal/platform/kafka/compat.go` | `EnsureBackwardCompatibility` — layer two of spec §8.3 |
+| `internal/platform/kafka/serde_test.go` | Encode/decode round trip, framing bytes, BACKWARD enforcement, fail-closed on unregistered subject |
 | `cmd/schemactl/main.go` | Registers `.proto` schemas. The only writer to the registry |
 
 One serde per topic, not one global serde. Under `TopicRecordNameStrategy` the same message type on two topics has two subjects and two schema ids, and franz-go's `sr.Serde` keys its registrations by Go type — so a single serde holding both would be ambiguous. Per-topic also matches how producers and consumers are already scoped.
@@ -338,6 +339,7 @@ git commit -m "feat(envelope): CloudEvents binary-mode attributes in Kafka heade
   - `func (s *Serde) Encode(m proto.Message) ([]byte, error)`
   - `func (s *Serde) Decode(b []byte) (proto.Message, error)`
   - `var kafka.ErrSubjectNotRegistered = errors.New(...)`
+  - `func kafka.EnsureBackwardCompatibility(ctx context.Context, cl *sr.Client) error`
 
 **One rule this task imposes on every future `.proto` file:** exactly one top-level message per file. The Confluent protobuf format carries a message-index array identifying which message in the file the payload is, and this serde registers index `[0]`. A second top-level message in a file would silently be framed as the first.
 
@@ -405,7 +407,11 @@ func Start() (stop func(), err error) {
 	ctr, err := testcontainers.Run(ctx, Image,
 		testcontainers.WithExposedPorts("8080/tcp"),
 		testcontainers.WithEnv(map[string]string{
-			"APICURIO_STORAGE_KIND": "mem",
+			// Apicurio 3.x has no "mem" storage kind; sql over in-memory H2 is
+			// its ephemeral store. Set explicitly so a registry started for a
+			// test cannot quietly pick up persistent storage.
+			"APICURIO_STORAGE_KIND":     "sql",
+			"APICURIO_STORAGE_SQL_KIND": "h2",
 		}),
 		testcontainers.WithWaitStrategyAndDeadline(2*time.Minute,
 			wait.ForHTTP("/apis/registry/v3/system/info").WithPort("8080/tcp")),
@@ -531,12 +537,39 @@ func TestSerdeRoundTripsThroughConfluentFraming(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	// Confluent framing: magic byte 0x00, then a big-endian schema id.
-	if len(b) < 5 {
+	// Assert the framing byte by byte rather than just the magic byte. Encode and
+	// Decode are symmetric, so a serde that omitted the protobuf message-index
+	// array entirely would still round-trip through itself here while emitting
+	// payloads no Confluent or Java consumer could read. The index is the whole
+	// difference between Confluent *protobuf* framing and protobuf bytes behind an
+	// Avro-shaped header, so it has to be checked against the wire, not the
+	// round trip.
+	if len(b) < 6 {
 		t.Fatalf("framed payload too short: %d bytes", len(b))
 	}
 	if b[0] != 0x00 {
 		t.Fatalf("want magic byte 0x00, got 0x%02x", b[0])
+	}
+	id := int(b[1])<<24 | int(b[2])<<16 | int(b[3])<<8 | int(b[4])
+	ss, err := cl.SchemaByVersion(ctx, kafka.Subject(topic, "sagaflow.inventory.v1.SeatHeld"), -1)
+	if err != nil {
+		t.Fatalf("look up the registered id: %v", err)
+	}
+	if id != ss.ID {
+		t.Fatalf("framed schema id %d is not the registered id %d", id, ss.ID)
+	}
+	// One top-level message per .proto file means the index path is [0], which the
+	// Confluent format shortens to a single zero byte.
+	if b[5] != 0x00 {
+		t.Fatalf("want the [0] message-index shortcut at byte 5, got 0x%02x", b[5])
+	}
+	// Everything after the header must be the bare protobuf encoding.
+	var bare inventoryv1.SeatHeld
+	if err := proto.Unmarshal(b[6:], &bare); err != nil {
+		t.Fatalf("payload after the header is not protobuf: %v", err)
+	}
+	if !proto.Equal(want, &bare) {
+		t.Fatalf("payload after the header lost data:\n want %v\n got  %v", want, &bare)
 	}
 
 	msg, err := s.Decode(b)
@@ -549,6 +582,38 @@ func TestSerdeRoundTripsThroughConfluentFraming(t *testing.T) {
 	}
 	if !proto.Equal(want, got) {
 		t.Fatalf("round trip lost data:\n want %v\n got  %v", want, got)
+	}
+}
+
+func TestBackwardCompatibilityRejectsAFieldTypeChange(t *testing.T) {
+	ctx := context.Background()
+	cl := client(t, srtest.Shared(t).URL())
+	const file = "../../../proto/sagaflow/inventory/v1/events.proto"
+	register(t, cl, topic, file, &inventoryv1.SeatHeld{})
+
+	if err := kafka.EnsureBackwardCompatibility(ctx, cl); err != nil {
+		t.Fatalf("ensure backward compatibility: %v", err)
+	}
+
+	// The assertion that matters is a rejected registration, not a config value
+	// read back. A registry left on its NONE default accepts this change happily,
+	// so this is what tells us layer two of spec §8.3 is actually switched on.
+	text, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("read %s: %v", file, err)
+	}
+	incompatible := strings.Replace(string(text), "string hold_id = 1;", "int32 hold_id = 1;", 1)
+	if incompatible == string(text) {
+		t.Fatal("the field this test mutates has been renamed; update the test")
+	}
+
+	subject := kafka.Subject(topic, "sagaflow.inventory.v1.SeatHeld")
+	if _, err := cl.CreateSchema(ctx, subject, sr.Schema{
+		Schema: incompatible,
+		Type:   sr.TypeProtobuf,
+	}); err == nil {
+		t.Fatal("the registry accepted a field type change on an existing subject — " +
+			"BACKWARD compatibility is not being enforced")
 	}
 }
 
@@ -675,14 +740,89 @@ func (s *Serde) Decode(b []byte) (proto.Message, error) {
 }
 ```
 
-- [ ] **Step 5: Run the serde tests**
+- [ ] **Step 5: Implement `compat.go`**
+
+Spec §8.3 asks for **three** layers of compatibility enforcement, and the middle one is the registry
+rejecting an incompatible schema at registration time. A registry defaults to `NONE`, so without this
+step that layer is silently absent: `buf breaking` and fail-closed produce still work, but an
+incompatible schema that reaches `make schemas-register` is accepted.
+
+Create `internal/platform/kafka/compat.go`:
+
+```go
+package kafka
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/twmb/franz-go/pkg/sr"
+)
+
+// EnsureBackwardCompatibility pins the registry's global compatibility level to
+// BACKWARD. It is the second of the three layers spec §8.3 asks for, sitting
+// between `buf breaking` in CI and a producer that fails closed on a missing
+// schema id.
+//
+// The level is global rather than per-subject for two reasons. Subjects added in
+// later phases inherit it with no extra call, and setting a per-subject override
+// requires the subject to exist — which it does not on a registry's first run.
+// Enforcement is inherited: a subject with no override of its own is still
+// checked against the global level.
+//
+// This is deliberately weaker than it sounds, and §8.3 is explicit about why:
+// the registry checks a schema when it is *registered*, not when a message is
+// produced. Nothing in an open-source Kafka can stop a determined producer from
+// publishing arbitrary bytes, so this is defence against mistakes, not bypass.
+func EnsureBackwardCompatibility(ctx context.Context, cl *sr.Client) error {
+	// With no subjects, SetCompatibility and Compatibility both address the global
+	// config, which is exactly what is wanted here.
+	for _, res := range cl.SetCompatibility(ctx, sr.SetCompatibility{Level: sr.CompatBackward}) {
+		if res.Err != nil {
+			return fmt.Errorf("kafka: set global BACKWARD compatibility: %w", res.Err)
+		}
+	}
+
+	// Read the level back instead of trusting what SetCompatibility reports.
+	// SetCompatibility unmarshals the registry's response *over the value it sent*,
+	// so a response that omitted the field would still echo BACKWARD — the check
+	// would pass without observing anything. The GET decodes a different JSON field
+	// name, which makes it an independent observation.
+	//
+	// The read is global on purpose: Apicurio answers GET /config/{subject} for a
+	// subject with no override with NONE rather than the inherited level, so a
+	// per-subject read-back would report failure while enforcement was in fact
+	// active.
+	for _, res := range cl.Compatibility(ctx) {
+		if res.Err != nil {
+			return fmt.Errorf("kafka: read back global compatibility: %w", res.Err)
+		}
+		if res.Level != sr.CompatBackward {
+			return fmt.Errorf("kafka: global compatibility is %s, want BACKWARD", res.Level)
+		}
+	}
+	return nil
+}
+```
+
+- [ ] **Step 6: Run the serde tests**
 
 Run: `go test ./internal/platform/kafka/ -race -v -timeout 10m`
-Expected: all three PASS.
+Expected: all four PASS.
 
-If registration fails with a reference error mentioning `google/protobuf/timestamp.proto`, the registry did not resolve the well-known import implicitly. Fix it by passing the import as a `sr.SchemaReference` in the `register` helper and in `schemactl`; do not remove the `Timestamp` field.
+If registration fails with a reference error mentioning `google/protobuf/timestamp.proto`, the registry did not resolve the well-known import implicitly. Fix it by passing the import as a `sr.SchemaReference` in the `register` helper and in `schemactl`; do not remove the `Timestamp` field. (Verified against Apicurio 3.3.1: the well-known import *is* resolved implicitly, so this fallback was not needed.)
 
-- [ ] **Step 6: Implement `cmd/schemactl/main.go`**
+Prove both new guards have teeth rather than trusting that they passed — each of them would pass for the
+wrong reason under a plausible implementation:
+
+- Delete `sr.Index(0)` from `serde.go` and rerun. Expected: FAIL at `want the [0] message-index shortcut
+  at byte 5, got 0x0a` (0x0a is protobuf's field-1 tag, i.e. the payload started with no index byte).
+- Delete the `EnsureBackwardCompatibility` call from the compatibility test and rerun. Expected: FAIL at
+  `the registry accepted a field type change`.
+
+Restore both afterwards.
+
+- [ ] **Step 7: Implement `cmd/schemactl/main.go`**
 
 ```go
 // Command schemactl registers .proto schemas with the schema registry.
@@ -737,6 +877,15 @@ func run(ctx context.Context, registry string) error {
 		return fmt.Errorf("sr client: %w", err)
 	}
 
+	// Pin compatibility before registering anything, so an incompatible change in
+	// this very run is rejected rather than accepted and enforced only next time.
+	// A registry defaults to NONE, which would quietly drop one of the three
+	// layers spec §8.3 asks for.
+	if err := kafka.EnsureBackwardCompatibility(ctx, cl); err != nil {
+		return err
+	}
+	slog.Info("compatibility pinned", "level", "BACKWARD", "scope", "global")
+
 	for _, b := range bindings {
 		text, err := os.ReadFile(b.file)
 		if err != nil {
@@ -760,25 +909,27 @@ func run(ctx context.Context, registry string) error {
 
 `CreateSchema` is idempotent for identical content: re-registering the same schema returns the existing id and version rather than creating a new one, so `make schemas-register` is safe to run repeatedly.
 
-- [ ] **Step 7: Register against the Compose registry end to end**
+- [ ] **Step 8: Register against the Compose registry end to end**
 
 ```bash
 make up
+curl -s http://localhost:8080/apis/ccompat/v7/config   # {"compatibilityLevel":"NONE"} on a fresh registry
 make schemas-register
+curl -s http://localhost:8080/apis/ccompat/v7/config   # now BACKWARD
 curl -s http://localhost:8080/apis/ccompat/v7/subjects | tr ',' '\n'
 ```
 
-Expected: two log lines with ids, and the subjects list containing `inventory.events-sagaflow.inventory.v1.SeatHeld` and `inventory.commands-sagaflow.inventory.v1.HoldSeat`.
+Expected: a `compatibility pinned` line, then two registration lines with ids, and the subjects list containing `inventory.events-sagaflow.inventory.v1.SeatHeld` and `inventory.commands-sagaflow.inventory.v1.HoldSeat`.
 
-- [ ] **Step 8: Verify re-registration is a no-op**
+- [ ] **Step 9: Verify re-registration is a no-op**
 
 ```bash
 make schemas-register
 ```
 
-Expected: the same ids and versions as Step 7. A bumped version means the `.proto` text changed between runs, or `CreateSchema` is being handed differently-formatted content — check for a trailing-newline difference.
+Expected: the same ids and versions as Step 8. A bumped version means the `.proto` text changed between runs, or `CreateSchema` is being handed differently-formatted content — check for a trailing-newline difference.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 make down

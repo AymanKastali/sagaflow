@@ -118,7 +118,7 @@ a passing test suite, which is the least debuggable class of failure this projec
 | Go | **1.26.6** | go.dev/dl | Latest stable. The target environment currently has 1.26.5 — upgrade before phase 1 |
 | Kafka | **4.3.1** | `apache/kafka:4.3.1` | Latest stable, KRaft only. Apache-2.0 image, env-var configurable, self-formatting |
 | Postgres | **18.6** | `postgres:18.6` | Latest stable major. Four containers, one per service |
-| Apicurio Registry | **3.3.1** | `apicurio/apicurio-registry:3.3.1` | Apache 2.0. Single image in 3.x; storage selected by `APICURIO_STORAGE_KIND` (default in-memory, which is what we want) |
+| Apicurio Registry | **3.3.1** | `apicurio/apicurio-registry:3.3.1` | Apache 2.0. Single image in 3.x; storage selected by `APICURIO_STORAGE_KIND`, whose 3.x values are `sql`, `kafkasql`, `gitops`, `kubernetesops` — **not** 2.x's `mem`. Use `sql` with `APICURIO_STORAGE_SQL_KIND=h2` for the ephemeral in-memory store |
 | Jaeger | **2.20.0** | `cr.jaegertracing.io/jaegertracing/jaeger:2.20.0` | Jaeger **v2**, not the v1 `jaegertracing/all-in-one` image. OTLP-native: gRPC 4317, HTTP 4318, UI 16686 |
 | `buf` CLI | **1.72.0** | bufbuild/buf release | Pinned in the Makefile, not installed from `latest` |
 | Docker / Compose | 29.7.2 / v5.3.1 | — | Verified in the target environment |

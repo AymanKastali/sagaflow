@@ -12,7 +12,7 @@
 
 **Plan sequence:** this is plan 5 of 6. See [README.md](README.md). **Depends on Phase 1** (`pg`, `pgtest`) and **Phase 2** (`eventstore.Append`, service migrations). Phase 4b depends on this one.
 
-**Deliverable that ends this phase:** a handler that rolls back publishes nothing; a handler that commits publishes exactly its rows in `id` order; a publish failure leaves the rows claimable; and two pollers against one database result in one active poller.
+**Deliverable that ends this phase:** a handler that rolls back publishes nothing and delivers no `NOTIFY`; a handler that commits publishes exactly its rows in `id` order; a publish failure leaves the rows claimable; a row that commits *after* a higher-id row was already published is still published; and two pollers against one database result in one active poller.
 
 ## Global Constraints
 
@@ -38,9 +38,10 @@ Copied verbatim from spec §5 and §3. Every task's requirements implicitly incl
 | `internal/booking/migrations/002_outbox.sql` | Booking's, identical, separate database |
 | `internal/platform/outbox/outbox.go` | `Message`, `Enqueue`, the `Publisher` interface |
 | `internal/platform/outbox/poller.go` | `Poller`, `Drain`, advisory-lock election, `Prune`, `Run` |
-| `internal/platform/outbox/outbox_test.go` | Transactionality, ordering, failure retention, election, pruning |
+| `internal/platform/outbox/outbox_test.go` | Transactionality, ordering, failure retention, election, pruning, out-of-order commits, query plan |
+| `internal/platform/outbox/export_test.go` | Exposes `claimSQL` to the external test package |
 
-`Drain` is exported so tests drive one claim-publish-mark cycle synchronously. `Run` is the loop that calls it, and tests never rely on `Run`'s timing — spec §12.4 forbids `time.Sleep` in assertions.
+`Drain` is exported so tests drive one claim-publish-mark cycle synchronously. `Run` is the loop that calls it, and no test asserts on `Run`'s *timing* — spec §12.4 forbids `time.Sleep` in assertions. That is not a reason to leave `Run` untested: it is the only entry point production calls, and §12.4's own prescription — block on a signal with a context deadline as the failure mode — covers it. `fakePublisher` carries an optional channel for exactly that.
 
 ---
 
@@ -436,7 +437,7 @@ git commit -m "feat(outbox): transactional Enqueue with NOTIFY on commit"
   - `func NewPoller(pool *pgxpool.Pool, pub Publisher) *Poller`
   - `func (p *Poller) Drain(ctx context.Context) (int, error)` — one claim-publish-mark cycle, returns rows published
   - `func (p *Poller) Prune(ctx context.Context, olderThan time.Duration) (int64, error)`
-  - `func (p *Poller) TryElect(ctx context.Context) (held bool, release func(), err error)`
+  - `func (p *Poller) TryElect(ctx context.Context) (held bool, release func(), err error)` — `release` is idempotent
   - `func (p *Poller) Run(ctx context.Context) error` — elect, then loop on NOTIFY with a 1 s floor
   - `const BatchSize = 100`, `const AdvisoryLockKey = 0x5A6A_0001`
 
@@ -663,9 +664,263 @@ func TestTryElectAllowsOnlyOnePoller(t *testing.T) {
 	}
 	release3()
 }
+
+// The trap spec §6.4 exists to warn about, made executable.
+//
+// BIGSERIAL values are handed out at insert and become visible at commit, so id
+// order and visibility order are not the same order. A poller tracking
+// `WHERE id > cursor` reads the higher id, advances past it, and never sees the
+// lower one — losing a message silently, only under concurrency, which is why it
+// survives every test written on a quiet machine.
+//
+// Claiming by flag has no such window. This test passes for the implementation we
+// have and fails for a cursor, which is the only reason it is worth writing.
+func TestClaimByFlagSurvivesAnOutOfOrderCommit(t *testing.T) {
+	ctx := context.Background()
+	pool := newDB(t, "poller_out_of_order")
+
+	// A inserts first, so it takes the lower id. It commits last.
+	txA, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin A: %v", err)
+	}
+	defer func() { _ = txA.Rollback(ctx) }()
+	if err := outbox.Enqueue(ctx, txA, []outbox.Message{msg("inventory.events", "lower-id")}); err != nil {
+		t.Fatalf("enqueue A: %v", err)
+	}
+
+	// B inserts second, so it takes the higher id, and commits first.
+	txB, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin B: %v", err)
+	}
+	if err := outbox.Enqueue(ctx, txB, []outbox.Message{msg("inventory.events", "higher-id")}); err != nil {
+		t.Fatalf("enqueue B: %v", err)
+	}
+	if err := txB.Commit(ctx); err != nil {
+		t.Fatalf("commit B: %v", err)
+	}
+
+	pub := &fakePublisher{}
+	p := outbox.NewPoller(pool, pub)
+
+	// Only B is visible, so only B is published — and the poller has now published
+	// a row whose id is *higher* than one still to come.
+	n, err := p.Drain(ctx)
+	if err != nil {
+		t.Fatalf("first drain: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("want 1 published while A is uncommitted, got %d", n)
+	}
+
+	if err := txA.Commit(ctx); err != nil {
+		t.Fatalf("commit A: %v", err)
+	}
+
+	// This is the assertion a cursor design fails: the late-committing lower id
+	// must still be published.
+	n, err = p.Drain(ctx)
+	if err != nil {
+		t.Fatalf("second drain: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("want the late-committing row published, got %d — a lower id that "+
+			"commits after a higher one was published must not be skipped", n)
+	}
+
+	got := pub.keys()
+	want := []string{"higher-id", "lower-id"}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("want %v (published in commit order, not id order), got %v", want, got)
+	}
+
+	// Confirm the premise rather than assuming it: the row published second really
+	// does carry the lower id. Without this the test could pass while proving
+	// nothing about out-of-order ids.
+	var lower, higher int64
+	if err := pool.QueryRow(ctx,
+		`SELECT (SELECT id FROM outbox WHERE key = 'lower-id'),
+		        (SELECT id FROM outbox WHERE key = 'higher-id')`).Scan(&lower, &higher); err != nil {
+		t.Fatalf("read ids: %v", err)
+	}
+	if lower >= higher {
+		t.Fatalf("the test did not reproduce out-of-order ids: lower-id got %d, higher-id got %d",
+			lower, higher)
+	}
+}
+
+// The partial index is what keeps the claim cheap as history grows. A Seq Scan
+// here would not fail anything — it would just get slower for years — so the plan
+// shape is asserted rather than eyeballed once.
+func TestClaimUsesThePartialIndex(t *testing.T) {
+	ctx := context.Background()
+	pool := newDB(t, "poller_index")
+
+	// A realistic shape: a long tail of published history, a short pending queue.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO outbox (topic, key, payload, headers, published_at)
+		SELECT 'inventory.events', 'old-' || g, '\x00'::bytea, '{}'::jsonb, now()
+		FROM generate_series(1, 5000) g`); err != nil {
+		t.Fatalf("seed published: %v", err)
+	}
+	enqueue(t, pool, "pending-1", "pending-2", "pending-3")
+	if _, err := pool.Exec(ctx, "ANALYZE outbox"); err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+
+	var plan string
+	rows, err := pool.Query(ctx, "EXPLAIN "+outbox.ClaimSQL, outbox.BatchSize)
+	if err != nil {
+		t.Fatalf("explain: %v", err)
+	}
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			rows.Close()
+			t.Fatalf("scan plan: %v", err)
+		}
+		plan += line + "\n"
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate plan: %v", err)
+	}
+
+	if !strings.Contains(plan, "outbox_unpublished") {
+		t.Fatalf("the claim does not use the partial index:\n%s", plan)
+	}
+	if strings.Contains(plan, "Seq Scan") {
+		t.Fatalf("the claim falls back to a sequential scan:\n%s", plan)
+	}
+}
+
+// Run is the only part of this package that production actually calls, and it was
+// otherwise untested. It covers three things one test can reasonably cover: the
+// election, the drain loop, and — under -race — the listener goroutine's
+// lifecycle, since releasing the listen connection while that goroutine is still
+// inside WaitForNotification would be a use-after-free.
+//
+// The wake-up may come from NOTIFY or from the PollFloor ticker, and the test
+// deliberately does not care which: both paths exist precisely so that either one
+// alone is sufficient.
+func TestRunPublishesAndShutsDownCleanly(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	pool := newDB(t, "poller_run")
+
+	pub := &fakePublisher{published: make(chan []outbox.Claimed, 4)}
+	runDone := make(chan error, 1)
+	go func() { runDone <- outbox.NewPoller(pool, pub).Run(ctx) }()
+
+	enqueue(t, pool, "seat-14A")
+
+	select {
+	case batch := <-pub.published:
+		if len(batch) != 1 || batch[0].Key != "seat-14A" {
+			t.Fatalf("want one batch holding seat-14A, got %+v", batch)
+		}
+	case <-ctx.Done():
+		t.Fatal("Run never published the enqueued row")
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run returned an error on shutdown: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("Run did not return after its context was cancelled")
+	}
+}
+
+// Enqueue's doc comment claims the NOTIFY is transactional. That claim is about
+// our code, not about Postgres: swapping tx.Exec for pool.Exec would send the
+// notification immediately and wake a poller to hunt for a message that was never
+// written. So it is pinned here rather than trusted.
+func TestNotifyIsWithheldUntilCommit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	pool := newDB(t, "outbox_notify")
+
+	listen := func(t *testing.T) *pgxpool.Conn {
+		t.Helper()
+		conn, err := pool.Acquire(ctx)
+		if err != nil {
+			t.Fatalf("acquire listener: %v", err)
+		}
+		t.Cleanup(conn.Release)
+		if _, err := conn.Exec(ctx, "LISTEN "+outbox.NotifyChannel); err != nil {
+			t.Fatalf("listen: %v", err)
+		}
+		return conn
+	}
+
+	// A separate connection per phase: a WaitForNotification that ends in a
+	// deadline may leave its connection unusable, and that must not be mistaken
+	// for the second half of this test failing.
+	rolledBack := listen(t)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if err := outbox.Enqueue(ctx, tx, []outbox.Message{msg("inventory.events", "rolled-back")}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+
+	brief, cancelBrief := context.WithTimeout(ctx, time.Second)
+	defer cancelBrief()
+	if n, err := rolledBack.Conn().WaitForNotification(brief); err == nil {
+		t.Fatalf("a rolled-back enqueue delivered a notification on %q", n.Channel)
+	} else if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("waiting for the absence of a notification: %v", err)
+	}
+
+	committed := listen(t)
+	enqueue(t, pool, "committed")
+
+	n, err := committed.Conn().WaitForNotification(ctx)
+	if err != nil {
+		t.Fatalf("want a notification after commit: %v", err)
+	}
+	if n.Channel != outbox.NotifyChannel {
+		t.Fatalf("want channel %q, got %q", outbox.NotifyChannel, n.Channel)
+	}
+}
 ```
 
-Add these imports to the test file: `sync`, `time`.
+Add these imports to the test file: `strings`, `sync`, `time`. `fakePublisher` needs the optional signal channel the last two tests block on:
+
+```go
+type fakePublisher struct {
+	mu   sync.Mutex
+	got  [][]outbox.Claimed
+	err  error
+	call int
+	// published, when set, receives each batch. Tests that drive Run block on it
+	// instead of sleeping: spec §12.4 wants completion to be a signal with a
+	// context deadline as the failure mode, not a guess at a duration.
+	published chan []outbox.Claimed
+}
+```
+
+and in `Publish`, after appending to `got`:
+
+```go
+	if f.published != nil {
+		select {
+		case f.published <- msgs:
+		default: // buffered and full; a test that cares reads every batch
+		}
+	}
+```
+
+**Verify the out-of-order test has teeth**, because it is the whole reason this phase claims by flag. Replace the claim's `WHERE published_at IS NULL` with a cursor — `WHERE id > (SELECT coalesce(max(id), 0) FROM outbox WHERE published_at IS NOT NULL)` — and rerun the package. Expected: `TestClaimByFlagSurvivesAnOutOfOrderCommit` and `TestClaimUsesThePartialIndex` fail, and **every other test in the package still passes**. That is what §6.4 means by a bug that survives every test written on a quiet machine.
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -820,12 +1075,19 @@ func (p *Poller) TryElect(ctx context.Context) (held bool, release func(), err e
 		conn.Release()
 		return false, func() {}, nil
 	}
+	// release is idempotent. The natural calling pattern is `defer release()` plus
+	// an explicit release on the hand-over path, and a pooled connection that has
+	// already gone back to the pool panics on use — pgxpool.Conn.Exec dereferences
+	// a nil resource — so calling twice must be safe rather than fatal.
+	var once sync.Once
 	return true, func() {
-		// Unlock explicitly so a graceful shutdown hands over immediately rather
-		// than waiting for the connection to be reaped.
-		_, _ = conn.Exec(context.WithoutCancel(ctx),
-			"SELECT pg_advisory_unlock($1)", int64(AdvisoryLockKey))
-		conn.Release()
+		once.Do(func() {
+			// Unlock explicitly so a graceful shutdown hands over immediately
+			// rather than waiting for the connection to be reaped.
+			_, _ = conn.Exec(context.WithoutCancel(ctx),
+				"SELECT pg_advisory_unlock($1)", int64(AdvisoryLockKey))
+			conn.Release()
+		})
 	}, nil
 }
 
@@ -857,9 +1119,7 @@ func (p *Poller) Run(ctx context.Context) error {
 
 	notified := make(chan struct{}, 1)
 	var listener sync.WaitGroup
-	listener.Add(1)
-	go func() {
-		defer listener.Done()
+	listener.Go(func() {
 		for {
 			if _, err := listenConn.Conn().WaitForNotification(ctx); err != nil {
 				return // ctx cancelled, or the connection went away
@@ -869,7 +1129,7 @@ func (p *Poller) Run(ctx context.Context) error {
 			default: // a wake-up is already pending; coalesce
 			}
 		}
-	}()
+	})
 	// Wait for the listener to stop before releasing its connection: a released
 	// connection goes back to the pool and may be handed to another caller, so a
 	// goroutine still inside WaitForNotification on it is a use-after-free.
@@ -924,11 +1184,20 @@ If `TestTryElectAllowsOnlyOnePoller` fails because the second poller also wins, 
 
 - [ ] **Step 5: Confirm the partial index is actually used**
 
-```bash
-psql "$DSN" -c "EXPLAIN SELECT id FROM outbox WHERE published_at IS NULL ORDER BY id LIMIT 100"
+This is `TestClaimUsesThePartialIndex` above, not a manual `psql` check. A `Seq Scan` here fails nothing and breaks nothing — it just makes the poller slower every year — so it needs a permanent guard rather than one look.
+
+The test explains `outbox.ClaimSQL` rather than a copy of the query, via `internal/platform/outbox/export_test.go`:
+
+```go
+package outbox
+
+// ClaimSQL exposes the poller's claim query to the package's external tests, so
+// the query-plan test explains the statement the poller actually runs rather than
+// a copy of it that can drift out of step.
+var ClaimSQL = claimSQL
 ```
 
-Run this against a database with a few thousand published rows and a handful of pending ones. Expected: an `Index Scan using outbox_unpublished`. A `Seq Scan` means the partial index predicate does not match the query's `IS NULL` form, which would make the poller slower as history grows.
+Verify it has teeth by deleting the `CREATE INDEX` line from `002_outbox.sql` and rerunning: expected FAIL reporting `Seq Scan on outbox`. Restore it afterwards.
 
 - [ ] **Step 6: Commit**
 
