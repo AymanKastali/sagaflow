@@ -101,8 +101,9 @@ terminal; there is nothing to install and nothing to run.
 
 1. **This page**, then the [glossary](docs/glossary.md) — the vocabulary. Skim
    it; you will come back.
-2. **The architecture walkthrough** — the whole picture, with diagrams.
-   *Not yet written; it arrives in the next documentation pass.*
+2. **[The architecture](docs/architecture.md)** — the whole picture, with
+   diagrams: the topology, the delivery path that makes crashes survivable, the
+   saga, and the compensation matrix.
 3. **`go doc ./internal/platform/eventstore`** — how state is stored, and why
    the choice of stream boundary is the whole design. Then `eventstore.go`.
 4. **`go doc ./internal/platform/outbox`** — how a state change becomes a
@@ -110,9 +111,8 @@ terminal; there is nothing to install and nothing to run.
    `poller.go`.
 5. **`go doc ./internal/platform/inbox`** — how a message that arrives twice is
    applied once.
-6. **The message lifecycle** — the three above traced end to end with the
-   actual rows and headers. *Not yet written; it arrives in the next
-   documentation pass.*
+6. **[The message lifecycle](docs/message-lifecycle.md)** — the three above
+   traced end to end with the actual rows, headers and bytes.
 7. **`go doc ./internal/platform/envelope`**, then `codec`, then `schema` — what
    is actually on the wire and in the database, and why one schema has two
    encodings.
