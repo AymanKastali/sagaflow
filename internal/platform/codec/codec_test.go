@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	migrations "github.com/kptac/sagaflow/internal/inventory/migrations"
 	"github.com/kptac/sagaflow/internal/platform/codec"
-	inventoryv1 "github.com/kptac/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
+	inventoryv1 "github.com/kptac/sagaflow/contracts/sagaflow/inventory/v1"
 	"github.com/kptac/sagaflow/internal/platform/eventstore"
 	"github.com/kptac/sagaflow/internal/platform/pg"
 	"github.com/kptac/sagaflow/internal/testsupport/pgtest"

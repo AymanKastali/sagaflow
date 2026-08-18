@@ -3,7 +3,7 @@ package inventoryv1_test
 import (
 	"testing"
 
-	inventoryv1 "github.com/kptac/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
+	inventoryv1 "github.com/kptac/sagaflow/contracts/sagaflow/inventory/v1"
 	"google.golang.org/protobuf/proto"
 )
 

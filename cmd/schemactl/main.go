@@ -12,7 +12,7 @@ import (
 	"log/slog"
 	"os"
 
-	inventoryv1 "github.com/kptac/sagaflow/internal/platform/contracts/sagaflow/inventory/v1"
+	inventoryv1 "github.com/kptac/sagaflow/contracts/sagaflow/inventory/v1"
 	"github.com/kptac/sagaflow/internal/platform/schema"
 	"github.com/twmb/franz-go/pkg/sr"
 	"google.golang.org/protobuf/proto"
