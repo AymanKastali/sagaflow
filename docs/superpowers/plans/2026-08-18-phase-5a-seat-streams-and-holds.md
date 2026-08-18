@@ -1294,6 +1294,14 @@ func (h *Handler) messages(msgs []proto.Message, in envelope.Envelope, seatID st
 }
 ```
 
+- [ ] **Step 3b: Prove the retry deterministically**
+
+*Added during execution — the plan missed it.* `TestTwoConcurrentHoldsProduceOneHoldAndOneRefusal` can pass without ever exercising the retry: if the two goroutines do not overlap, the second simply loads the committed `SeatHeld` and refuses, no conflict involved. So it does not prove what its own comment claims.
+
+Append to `commands_test.go` a test that arranges the conflict instead of hoping for it: open a transaction, `AppendSeat` a `SeatHeld` at version 1 and **do not commit**, then run the handler in a goroutine. Its insert blocks on the unique index. Wait for `pg_stat_activity.wait_event_type = 'Lock'` — a polled condition with a deadline, not a sleep before an assertion — commit the winner, and assert the handler produced exactly one `SeatUnavailable` row and appended nothing.
+
+Verify it discriminates by mutating `ConflictRetries` to `0`: the test must fail with `after 0 retries: eventstore: version conflict`. Restore it to `3`.
+
 - [ ] **Step 4: Run the tests to verify they pass**
 
 ```bash
