@@ -19,9 +19,9 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// One container for the package, per spec §12.4. The pure tests below need no
-// infrastructure and pgtest.Start is a no-op under -short, so this costs them
-// nothing.
+// One Postgres container for the whole package, shared by every test that
+// needs one. The pure tests above do not, and pgtest.Start is a no-op under
+// -short, so sharing one container here costs those tests nothing.
 func TestMain(m *testing.M) {
 	stop, err := pgtest.Start()
 	if err != nil {
@@ -61,8 +61,8 @@ func TestEncodeProducesReadableJSONWithProtoFieldNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	// Readability in psql during an incident is the reason storage is protojson
-	// and not protobuf bytes (spec §8.4), so assert on the shape a human sees.
+	// Storage is protojson rather than protobuf bytes precisely so this is
+	// readable in psql during an incident, so assert on the shape a human sees.
 	s := string(got.Data)
 	for _, want := range []string{`"hold_id"`, `"booking_id"`, `"seat_id"`, `"expires_at"`, "hold-1"} {
 		if !strings.Contains(s, want) {

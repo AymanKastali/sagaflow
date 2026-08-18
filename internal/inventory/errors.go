@@ -9,6 +9,6 @@ import "errors"
 var ErrUnknownEvent = errors.New("inventory: unknown seat event")
 
 // ErrUnknownCommand means a message arrived on inventory.commands that is not a
-// command. It is permanent: redelivery cannot make it a command, so the consumer
-// dead-letters it rather than retrying (spec §10.2).
+// command. It is permanent: redelivery cannot make it a command, so retrying
+// would only repeat the same failure — the consumer dead-letters it instead.
 var ErrUnknownCommand = errors.New("inventory: unknown command")

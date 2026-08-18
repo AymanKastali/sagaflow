@@ -14,7 +14,8 @@ import (
 )
 
 const (
-	// BatchSize bounds one claim (spec §10.3).
+	// BatchSize bounds how many rows a single claim can take, so one poll
+	// iteration never locks an unbounded number of rows at once.
 	BatchSize = 100
 	// AdvisoryLockKey elects the single active poller per database.
 	AdvisoryLockKey = 0x5A6A_0001
@@ -151,9 +152,9 @@ func (p *Poller) listen(ctx context.Context) (woken <-chan struct{}, stop func()
 //
 // Rows are claimed by flag, never by a cursor over id. BIGSERIAL values are
 // handed out at insert but become visible at commit, so a late-committing row can
-// carry a lower id than one already published — a cursor would step over it and
-// lose it silently, only under concurrency (spec §6.4). A flag has no such
-// window: whatever is still NULL gets claimed on the next pass.
+// carry a lower id than one already published — a cursor would step over it
+// and lose it silently, only under concurrency. A flag has no such window:
+// whatever is still NULL gets claimed on the next pass.
 //
 // SKIP LOCKED is for failover, not throughput: a second poller taking over mid
 // batch makes progress instead of blocking on the previous one's rows.

@@ -89,7 +89,8 @@ func TestHoldAppendsTheEventAndEnqueuesItInOneTransaction(t *testing.T) {
 }
 
 func TestARedeliveredCommandIsAppliedOnce(t *testing.T) {
-	// Spec §12.2: handle the same ce_id twice, state advances once.
+	// Handle the same ce_id twice and state must advance only once: the second
+	// delivery is exactly what the inbox exists to absorb.
 	ctx := t.Context()
 	pool := db(t, "inventory_handler_dedupe")
 	h := inventory.NewHandler(pool, jsonEncoder{})
@@ -145,9 +146,10 @@ func TestARefusedHoldWritesNoEventAndStillReplies(t *testing.T) {
 	}
 }
 
-// TestTwoConcurrentHoldsProduceOneHoldAndOneRefusal is spec §13 phase 5's
-// deliverable. The refusal is what phase 8's HTTP layer renders as a 409; there
-// is no HTTP yet, so the assertion is on the refusal itself.
+// TestTwoConcurrentHoldsProduceOneHoldAndOneRefusal is this package's central
+// guarantee: two racing holds on the same seat produce one SeatHeld and one
+// SeatUnavailable, never two holds. An HTTP layer would render the refusal as
+// a 409, but there is no HTTP yet, so the assertion is on the refusal itself.
 //
 // Both goroutines fold from version 0 and both attempt version 1. The loser gets
 // ErrVersionConflict, reloads, sees SeatHeld, and re-decides to a refusal — so
@@ -273,7 +275,7 @@ func TestAVersionConflictReloadsAndReDecides(t *testing.T) {
 
 // waitForLock blocks until a backend in this database is waiting on a lock,
 // which is how the test knows the handler reached its insert. A polled condition
-// with a deadline as the failure mode, not a sleep before an assertion (§12.4).
+// with a deadline as the failure mode, not a sleep before an assertion.
 func waitForLock(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)

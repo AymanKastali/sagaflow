@@ -1,10 +1,3 @@
-// Package outbox makes "the state changed" and "the message was sent" the same
-// commit.
-//
-// Enqueue writes into the caller's transaction; a separate poller publishes what
-// was committed. The guarantee is at-least-once and deliberately not
-// exactly-once — a crash between publishing and marking republishes, which is
-// precisely why platform/inbox exists (spec §10.1).
 package outbox
 
 import (

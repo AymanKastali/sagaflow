@@ -126,6 +126,15 @@ explanation is what rots.
 **Nothing is explained in two places.** Where a second place needs the concept,
 it links.
 
+**One exception, found while writing the chapters.** This rule and C1 conflict
+for a fact that two packages both depend on: C1 requires a chapter to be true out
+of context, and a reader running `go doc` in a terminal cannot follow a link.
+Where a mechanism is load-bearing for two packages — Postgres assigning
+`BIGSERIAL` at insert but making it visible at commit is the real case — **both
+chapters state it**, each applied to its own decision. Self-containment wins
+inside godoc. It does not win in `docs/`, where links work: a `docs/` page needing
+that mechanism links to the chapter rather than restating it.
+
 ### 5.1 What `docs/` gains
 
 `docs/superpowers/` is named after the tool that generated it. A reader looking
@@ -153,8 +162,10 @@ nobody needs it to read the code.
 
 ## 6. The chapter standard (`doc.go`)
 
-Every package under `internal/`, plus `contracts/sagaflow/*/v1`, gets a
-`doc.go` holding only the package comment. Six headings, in this order, using
+Every **concept-bearing** package gets a `doc.go` holding only the package
+comment: everything under `internal/platform/`, the service packages such as
+`internal/inventory`, and `contracts/sagaflow/*/v1`. Trivial packages (the
+migrations embeds) and test-only packages are exempt — see §9's D1/D2. Six headings, in this order, using
 Go's godoc heading syntax so `go doc` renders them. The example below is
 abridged to keep this spec readable; a real chapter runs longer (C7):
 
@@ -322,11 +333,27 @@ A standard nobody checks is a standard that decays. `internal/docs/docs_test.go`
 is a level-1 test (no infrastructure, runs under `make test`) asserting the
 mechanical parts of this spec:
 
-- **D1.** Every package under `internal/` and `contracts/` has a non-empty
-  package comment.
-- **D2.** Every package under `internal/` and `contracts/` has that comment in
-  a file named `doc.go` containing only the package comment — matching §6,
-  which requires a chapter of every package, not only the platform ones.
+- **D1.** Every package under `internal/` and `contracts/` **that has at least
+  one non-test `.go` file** has a non-empty package comment.
+- **D2.** Every **concept-bearing** package — everything under
+  `internal/platform/` plus `internal/inventory` and the later service packages
+  — has that comment in a file named `doc.go` containing only the package
+  comment.
+
+  Two refinements found while surveying the tree, both recorded here because
+  the original wording was unimplementable:
+
+  *Test-only packages are exempt from D1 and D2.* `internal/integration` and
+  `internal/toolchain` contain no non-test `.go` file, and their package clause
+  is `integration_test`. Go forbids a non-`_test.go` file from declaring an
+  external test package, so a `doc.go` for them cannot be written at all. Their
+  package comment stays in the test file that carries it.
+
+  *Trivial packages get D1 but not D2 or D3.* `internal/inventory/migrations`
+  and `internal/booking/migrations` are nine lines that embed a directory of
+  SQL. A six-heading chapter for them would be padding, and §6's C7 bound of
+  60–120 lines would force it. They keep a short, honest package comment in the
+  file that already has one.
 - **D3.** Each such `doc.go` contains all six §6 headings, in order.
 - **D4.** No `.go` file other than a `doc.go` contains `§`.
 - **D5.** `README.md` links to every package directory under

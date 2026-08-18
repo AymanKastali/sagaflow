@@ -9,11 +9,11 @@ import (
 
 // TestFullNamesMatchTheSpec pins the fully qualified message names.
 //
-// These strings are load-bearing in three places at once (spec §8.1): the
-// ce_type header on the wire, the events.type column in Postgres, and the
-// protoregistry lookup key that turns a stored row back into a message. Editing
-// a .proto file's `package` line would change all three silently — generated
-// code would still compile, the codec would still round-trip in a single
+// These strings are load-bearing in three places at once: the ce_type header
+// on the wire, the events.type column in Postgres, and the protoregistry
+// lookup key that turns a stored row back into a message. Editing a .proto
+// file's `package` line would change all three silently — generated code
+// would still compile, the codec would still round-trip in a single
 // process, and only cross-service delivery and replay of already-stored events
 // would break. So the names are asserted here rather than trusted.
 func TestFullNamesMatchTheSpec(t *testing.T) {

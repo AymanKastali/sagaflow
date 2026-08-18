@@ -15,7 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// One container for the package (spec §12.4).
+// One container for the whole package: starting one per test would dominate
+// the suite's runtime, so isolation comes from per-test database names instead.
 func TestMain(m *testing.M) {
 	stop, err := pgtest.Start()
 	if err != nil {
@@ -86,7 +87,8 @@ func TestDuplicateLeavesTheTransactionUsable(t *testing.T) {
 	}
 }
 
-// Spec §10.2: the saga and the projection both see SeatHeld and must dedupe
+// Two consumers in one service see the same SeatHeld for different purposes and
+// must deduplicate independently, which is why consumer is in the primary key
 // independently, which is why consumer is part of the primary key.
 func TestDifferentConsumersDeduplicateIndependently(t *testing.T) {
 	pool := newDB(t, "inbox_per_consumer")

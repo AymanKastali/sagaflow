@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// Minimum is the toolchain floor spec §5 pins. It matches the `go` directive in
+// Minimum is the toolchain floor this project pins. It matches the `go` directive in
 // go.mod, which is what actually causes the toolchain to be fetched.
 const Minimum = "go1.26.6"
 

@@ -21,7 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// One container for the package (spec §12.4). Note this makes the advisory-lock
+// One container for the package. Note this makes the advisory-lock
 // election test meaningful for the right reason: advisory locks are scoped to a
 // database, and every test here gets its own database inside the one cluster.
 func TestMain(m *testing.M) {
@@ -226,8 +226,8 @@ type fakePublisher struct {
 	err  error
 	call int
 	// published, when set, receives each batch. Tests that drive Run block on it
-	// instead of sleeping: spec §12.4 wants completion to be a signal with a
-	// context deadline as the failure mode, not a guess at a duration.
+	// instead of sleeping, so completion is a signal with a context deadline as
+	// the failure mode, not a guess at a duration.
 	published chan []envelope.Message
 }
 
@@ -344,9 +344,9 @@ func TestDrainLeavesRowsUnpublishedWhenPublishFails(t *testing.T) {
 	}
 }
 
-// Spec §10.1: the outbox is at-least-once. This test asserts the duplicate
-// rather than treating it as a defect, so nobody later "fixes" it by marking
-// rows before the publish succeeds.
+// The outbox guarantees at-least-once, never exactly-once. This test asserts
+// the duplicate rather than treating it as a defect, so nobody later "fixes"
+// it by marking rows before the publish succeeds.
 func TestRepublishAfterAMarkFailureIsADuplicateNotALoss(t *testing.T) {
 	ctx := t.Context()
 	pool := newDB(t, "poller_at_least_once")
@@ -444,7 +444,7 @@ func TestTryElectAllowsOnlyOnePoller(t *testing.T) {
 	release3()
 }
 
-// The trap spec §6.4 exists to warn about, made executable.
+// The trap that claim-by-flag exists to avoid, made executable.
 //
 // BIGSERIAL values are handed out at insert and become visible at commit, so id
 // order and visibility order are not the same order. A poller tracking

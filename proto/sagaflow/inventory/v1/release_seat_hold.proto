@@ -2,9 +2,12 @@ syntax = "proto3";
 
 package sagaflow.inventory.v1;
 
-// ReleaseSeatHold is the compensation for HoldSeat (spec §9.3). Compensations
-// retry forever, so it must be safe to apply to a seat that is already free:
-// inventory answers a released hold with SeatHoldReleased either way.
+// ReleaseSeatHold is the compensation for HoldSeat: it undoes a hold that a
+// later saga step made pointless.
+//
+// Compensations retry forever and never dead-letter, because a compensation
+// that gives up strands real inventory. So it must be safe to apply to a seat
+// that is already free: inventory answers with SeatHoldReleased either way.
 message ReleaseSeatHold {
   string hold_id = 1;
   string booking_id = 2;
