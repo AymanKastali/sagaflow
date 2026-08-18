@@ -81,7 +81,8 @@ from design spec §13.
 | 4 | Outbox and inbox — claim-based poller, consume-once dedup | `internal/platform/{outbox,inbox,kafka}` | **built** |
 | 5a | Inventory — seat streams and holds | `internal/inventory` | **built** |
 | 5b | Seat-hold TTL — a hold that expires with nobody alive to expire it | `internal/platform/timers`, `internal/inventory` | **built** |
-| 5c | Availability projection, wire.go, cmd/inventory | — | not built |
+| 5c | Availability projection — a derived seat map that may lag and still cannot oversell | `internal/inventory/projection.go` | **built** |
+| 5d | `wire.go` and `cmd/inventory` — inventory as something you can start | — | not built |
 | 6 | Hotel and payment, with the provider stub and idempotency keys | — | not built |
 | 7 | The saga — `Decide`, step timeouts, the compensation matrix | — | not built |
 | 8 | Booking API and its projection | — | not built |
@@ -125,8 +126,10 @@ terminal; there is nothing to install and nothing to run.
    decision functions are pure: no database, no context, and deliberately no
    clock.
 10. **`internal/inventory/commands.go`** — the single transaction that ties
-    every piece above together. Read it last; it will make sense only after the
-    rest.
+    every piece above together. It will make sense only after the rest.
+11. **`internal/inventory/projection.go`** — the read side: the same events
+    folded a second time into a table you can query, why it is allowed to be
+    stale, and why being stale cannot cost anyone a seat.
 
 ---
 
@@ -143,7 +146,7 @@ terminal; there is nothing to install and nothing to run.
 | Protobuf in Postgres | [internal/platform/codec](internal/platform/codec) | `go doc ./internal/platform/codec` |
 | Schema registry, Confluent framing | [internal/platform/schema](internal/platform/schema) | `go doc ./internal/platform/schema` |
 | Connection pool, migrations | [internal/platform/pg](internal/platform/pg) | `go doc ./internal/platform/pg` |
-| Seat streams and holds | [internal/inventory](internal/inventory) | `go doc ./internal/inventory` |
+| Seat streams, holds, availability view | [internal/inventory](internal/inventory) | `go doc ./internal/inventory` |
 | Message contracts | [contracts/](contracts) | its own Go module |
 
 Every package listed above has a chapter. The standard they are written to is in

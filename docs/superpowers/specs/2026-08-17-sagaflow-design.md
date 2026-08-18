@@ -262,6 +262,11 @@ The design removes the need for a fix:
   advances past them.
 - **Projections consume from Kafka** using committed consumer-group offsets, never by scanning `events`.
 
+That prohibition is about the live feed, not about a rebuild. Rebuilding a projection from the event
+store is safe as long as it enumerates *streams* and folds each one whole: it reads every version of a
+stream or it fails, so there is no cursor for a late-committing row to slip behind. What is forbidden is
+the incremental form — remembering a high-water `global_seq` and asking for everything above it.
+
 No component reads events by a monotonic local cursor, so no component can be bitten by this.
 
 This also yields per-stream publication ordering for free, which is the only ordering property the
@@ -632,6 +637,14 @@ two transactions produces either double-apply or silently dropped work, dependin
 `consumer` is in the key because several consumers in one service read the same message — the saga and
 the projection both see `SeatHeld` and must deduplicate independently. Rows are pruned past Kafka's
 retention window.
+
+A projection is not automatically one of those consumers. `inventory`'s availability view re-derives a
+seat from its stream rather than applying the event it was handed, so a redelivery recomputes the same
+row and writing it twice is indistinguishable from writing it once. It takes no inbox row, because there
+is nothing an inbox row would prevent. The saga is the opposite case and keeps its own: applying
+`SeatHeld` twice would advance a state machine twice. The rule is therefore about the handler's effect
+rather than about the number of consumers — deduplicate what cannot be repeated, and let what can be
+repeated be repeated.
 
 The distinction that matters most, and the most common mistake in these systems:
 

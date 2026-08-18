@@ -304,3 +304,40 @@ func TestLoadIsolatesStreams(t *testing.T) {
 		t.Fatalf("want only seat-14B's single event, got %+v", got)
 	}
 }
+
+func TestStreamsNamesEveryStreamOnce(t *testing.T) {
+	// A rebuild folds one stream at a time, so what it needs from the log is the
+	// list of streams — not the events, and above all not a cursor over them.
+	ctx := t.Context()
+	pool := newDB(t, "eventstore_streams")
+
+	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		for _, stream := range []string{"seat-b", "seat-a", "seat-b"} {
+			existing, err := eventstore.Load(ctx, tx, stream)
+			if err != nil {
+				return err
+			}
+			if err := eventstore.Append(ctx, tx, stream, len(existing), []eventstore.Event{
+				{Type: "T", Data: []byte(`{}`)},
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	var got []string
+	if err := pg.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		var err error
+		got, err = eventstore.Streams(ctx, tx)
+		return err
+	}); err != nil {
+		t.Fatalf("streams: %v", err)
+	}
+
+	if want := []string{"seat-a", "seat-b"}; !slices.Equal(got, want) {
+		t.Fatalf("want %v, got %v — seat-b has two events and must still be named once", want, got)
+	}
+}
