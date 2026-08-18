@@ -275,9 +275,12 @@ arrives late or out of order is an explicit row in the compensation matrix (§9.
 
 ## 7. Repository structure
 
-Per [go.dev/doc/modules/layout](https://go.dev/doc/modules/layout): one module at the root, one
-directory per binary under `cmd/`, server logic under `internal/`. No `pkg/` — that comes from
+Per [go.dev/doc/modules/layout](https://go.dev/doc/modules/layout): one directory per binary under
+`cmd/`, server logic under `internal/`. No `pkg/` — that comes from
 `golang-standards/project-layout`, which its own README states is not an official standard.
+
+Two modules, not one. The service module is at the root; `contracts/` is a second module so that
+anything importing the event types does not inherit pgx, franz-go, and testcontainers.
 
 Packages are organised by service, not by technical layer. The Go consensus is package-by-feature, so
 there are no `domain/`, `application/` or `infrastructure/` directories; files are split only when one
@@ -291,10 +294,10 @@ sagaflow/
 ├── buf.yaml
 ├── buf.gen.yaml
 ├── proto/                          # contract source of truth
-│   ├── booking/v1/*.proto
-│   ├── inventory/v1/*.proto
-│   ├── hotel/v1/*.proto
-│   └── payment/v1/*.proto
+│   └── sagaflow/<service>/v1/*.proto
+├── contracts/                      # generated protobuf — its own module, public
+│   ├── go.mod                      # github.com/kptac/sagaflow/contracts
+│   └── sagaflow/<service>/v1/
 ├── cmd/
 │   ├── booking/main.go             # ~20 lines: config, wire.New, Run
 │   ├── inventory/main.go
@@ -305,16 +308,32 @@ sagaflow/
     │   ├── eventstore/             # Append with expected version, Load, Replay
     │   ├── outbox/                 # tx-local Enqueue + claim-based poller
     │   ├── inbox/                  # consume-once deduplication
-    │   ├── kafka/                  # franz-go producer/consumer, CloudEvents headers, SR framing
+    │   ├── kafka/                  # franz-go producer/consumer, topic admin
+    │   ├── schema/                 # registry framing, compatibility level
+    │   ├── envelope/               # CloudEvents headers, the shared Message type
+    │   ├── codec/                  # protojson for the event store
     │   ├── saga/                   # state-machine runtime, timer scheduler
-    │   ├── contracts/              # generated protobuf + CloudEvents envelope mapping
     │   ├── pg/                     # pool, migrations, WithTx
     │   └── obs/                    # OTel setup, slog
+    ├── testsupport/                # containers for tests — never reached from production
+    │   ├── pgtest/  kafkatest/  srtest/
+    ├── integration/                # cross-package deliverables
+    ├── toolchain/                  # Go version floor guard
     ├── booking/
     ├── inventory/
     ├── hotel/
     └── payment/
 ```
+
+The single `contracts/` entry this section first described became four packages, because it
+named four different boundaries: `contracts/` is the generated code and now a separate public
+module; `codec/` is message ⇄ Postgres in protojson, deliberately registry-free so replay
+survives a registry outage (§8.4); `envelope/` is identity ⇄ Kafka headers; `schema/` is
+message ⇄ Kafka body in Confluent framing. Merging them would couple replay to the registry.
+
+`testsupport/`, `integration/`, and `toolchain/` were not named here originally. They exist,
+so the tree says so. See
+[2026-08-18-platform-package-restructure-design.md](2026-08-18-platform-package-restructure-design.md).
 
 `internal/platform/` will feel like writing a framework. That is deliberate: it is where the four
 topics live, and all four services need it.
