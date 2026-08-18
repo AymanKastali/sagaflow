@@ -52,9 +52,9 @@ func TestSeatStreamRoundTripsThroughPostgres(t *testing.T) {
 }
 
 func TestAppendAtAStaleVersionConflicts(t *testing.T) {
-	// The atomic hold *is* this constraint (spec §6.3): two writers folding from
-	// version 0 both try version 1 and Postgres rejects one. Asserted here so
-	// Task 4's retry has something proven to retry on.
+	// The atomic hold *is* this constraint: two writers folding from version 0
+	// both try to append version 1, and Postgres rejects one of them outright.
+	// Asserted here so the handler's retry has something proven to retry on.
 	ctx := t.Context()
 	pool := db(t, "inventory_store_conflict")
 
@@ -91,7 +91,7 @@ func TestLoadOfAnEmptyStreamIsAFreeSeatAtVersionZero(t *testing.T) {
 }
 
 func TestStoredEventIsReadableProtoJSON(t *testing.T) {
-	// Spec §8.4: storage is protojson so a replay survives a registry outage and
+	// Storage is protojson, so a replay survives a schema registry outage and
 	// psql shows something readable during an incident. Asserted against the
 	// column rather than through the codec, which would prove only symmetry.
 	ctx := t.Context()

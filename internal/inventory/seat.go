@@ -1,11 +1,3 @@
-// Package inventory owns the seat streams: one stream per seat, so that "this
-// seat is held at most once" is enforced by UNIQUE(stream_id, version) and by
-// nothing else (spec §6.3).
-//
-// The decision functions here are pure — no context, no database, and
-// deliberately no clock. A hold is live until an event ends it, never until a
-// clock says so, which is what stops a new hold racing an expiry: expiry is
-// SeatHoldExpired, appended by inventory's own timer (spec §10.5).
 package inventory
 
 import (
@@ -36,9 +28,11 @@ func (s Status) String() string {
 	return "unknown"
 }
 
-// SeatState is one seat stream folded. Seat streams are 3–5 events long
-// (spec §6.3), so rebuilding is always cheap and snapshots are unnecessary
-// rather than deferred.
+// SeatState is one seat stream folded. A seat's stream stays short — a hold,
+// maybe a release, maybe an expiry — because the seat has a stream of its own
+// rather than sharing one with the rest of the flight, so replaying it from
+// scratch is always cheap and a snapshot would solve a problem this package
+// does not have.
 type SeatState struct {
 	Version   int
 	Status    Status
@@ -123,9 +117,11 @@ func (s SeatState) Hold(cmd *inventoryv1.HoldSeat) Outcome {
 
 // Release decides a ReleaseSeatHold command, the compensation for HoldSeat.
 //
-// A hold that is already gone still gets a SeatHoldReleased reply. Compensations
-// retry forever and never dead-letter (spec §9.3), so silence here would mean a
-// compensation that never terminates.
+// A hold that is already gone still gets a SeatHoldReleased reply. A
+// compensation like this one retries with backoff forever rather than ever
+// landing on a dead-letter queue, so a release with no reply would retry with
+// nothing to stop it — replying even when there is nothing left to release is
+// what gives the retry loop a way to end.
 func (s SeatState) Release(cmd *inventoryv1.ReleaseSeatHold) Outcome {
 	released := &inventoryv1.SeatHoldReleased{
 		HoldId:    cmd.HoldId,
@@ -161,9 +157,10 @@ func Decide(s SeatState, cmd proto.Message) (Outcome, error) {
 		cmd.ProtoReflect().Descriptor().FullName())
 }
 
-// SeatID is the stream a command targets. Per spec §6.3 the seat id *is* the
-// stream id, so there is nothing to derive — but the lookup still belongs here,
-// because the handler must not know which field of which command holds it.
+// SeatID is the stream a command targets. Each seat has a stream of its own,
+// so the seat id and the stream id are the same string and there is nothing to
+// derive — but the lookup still belongs here, because the handler must not
+// know which field of which command holds it.
 func SeatID(cmd proto.Message) (string, error) {
 	switch c := cmd.(type) {
 	case *inventoryv1.HoldSeat:

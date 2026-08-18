@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	// CommandsTopic and EventsTopic are spec §9.1's topology: commands and events
-	// are separate topics, one pair per service.
+	// CommandsTopic and EventsTopic are separate topics, one pair per service,
+	// so a consumer that only wants to react to inventory's own events never
+	// has to filter out the commands other services send it.
 	CommandsTopic = "inventory.commands"
 	EventsTopic   = "inventory.events"
 
@@ -26,14 +27,16 @@ const (
 	// makes redelivery a no-op.
 	Source = "/sagaflow/inventory"
 
-	// Consumer is the inbox consumer name. Consumer groups are per purpose, not
-	// per service (spec §9.1), which is why it is part of the inbox primary key.
+	// Consumer is the inbox consumer name. A consumer group is scoped to one
+	// purpose rather than one service — a service can run more than one — which
+	// is why this name, not the service name, is part of the inbox primary key.
 	Consumer = "inventory.commands"
 )
 
-// ConflictRetries is spec §10.3: three immediate reload-retries before giving
-// up. Immediate rather than backed off, because a version conflict means the
-// winning write is already committed — there is nothing to wait for.
+// ConflictRetries is how many times Handle reloads and re-decides after a
+// version conflict before giving up. Immediate rather than backed off, because
+// a version conflict means the winning write is already committed — there is
+// nothing to wait for.
 const ConflictRetries = 3
 
 // Encoder frames an event for the wire.
@@ -71,8 +74,11 @@ func (h *Handler) Handle(ctx context.Context, env envelope.Envelope, cmd proto.M
 		env.Type, env.Subject, ConflictRetries, err)
 }
 
-// handleOnce is spec §7.2's invariant: one transaction writes exactly one
-// stream, plus its outbox rows, plus its inbox row.
+// handleOnce enforces this package's one invariant: a single transaction
+// writes exactly one stream, plus its outbox rows, plus its inbox row, and
+// never two streams — a stream's own invariant is only checkable within one
+// transaction, so writing a second stream in the same transaction would be
+// betting on a guarantee this package does not actually have.
 //
 // The inbox mark is inside the transaction so a conflict rolls it back too —
 // otherwise the retry would find its own mark and treat the command as already
@@ -116,7 +122,8 @@ func (h *Handler) handleOnce(ctx context.Context, env envelope.Envelope, cmd pro
 //
 // Each gets a fresh ce_id because each is a distinct message, keeps the
 // incoming correlation id so the saga can route the reply, and takes the
-// incoming ce_id as its causation id so the chain is walkable (spec §8.1).
+// incoming ce_id as its causation id, so each outgoing message still names
+// the one that caused it and the chain can be walked back message by message.
 func (h *Handler) messages(msgs []proto.Message, in envelope.Envelope, seatID string) ([]envelope.Message, error) {
 	out := make([]envelope.Message, 0, len(msgs))
 	for _, m := range msgs {

@@ -1,4 +1,4 @@
-// Package inventory_test exercises the seat stream as spec §12.1 level 1: no
+// Package inventory_test exercises the seat stream at its purest level: no
 // container, no context, no clock. Everything here is a fold and a decision.
 package inventory_test
 
@@ -115,8 +115,9 @@ func TestReleaseOfTheLiveHoldAppendsSeatHoldReleased(t *testing.T) {
 }
 
 func TestReleaseOfAHoldThatIsAlreadyGoneStillReplies(t *testing.T) {
-	// Compensations retry forever and never dead-letter (spec §9.3), so a second
-	// ReleaseSeatHold must terminate rather than go unanswered.
+	// Compensations retry with backoff forever and never dead-letter, so a
+	// second ReleaseSeatHold must still get an answer rather than go unanswered
+	// — an unanswered retry here would never stop retrying.
 	s := state(t, heldEvent(hold), &inventoryv1.SeatHoldReleased{HoldId: hold, SeatId: seat})
 	out := s.Release(&inventoryv1.ReleaseSeatHold{HoldId: hold, SeatId: seat})
 
@@ -153,7 +154,8 @@ func TestDecideRejectsAnUnknownCommand(t *testing.T) {
 }
 
 func TestSeatIDIsTheCommandsSeatID(t *testing.T) {
-	// Spec §6.3: the seat id *is* the stream id, so there is nothing to derive.
+	// Each seat has a stream of its own, so the seat id *is* the stream id and
+	// there is nothing to derive.
 	got, err := inventory.SeatID(holdSeat(hold))
 	if err != nil {
 		t.Fatalf("seat id: %v", err)
