@@ -142,7 +142,7 @@ func TestEventCrossesServicesExactlyOnce(t *testing.T) {
 		t.Fatalf("encode: %v", err)
 	}
 
-	incoming := envelope.Envelope{
+	outgoing := envelope.Envelope{
 		ID: ceID, Source: source, Type: storedEvent.Type, Subject: seat,
 		CorrelationID: "saga-booking-1",
 	}
@@ -156,7 +156,7 @@ func TestEventCrossesServicesExactlyOnce(t *testing.T) {
 			return err
 		}
 		return outbox.Enqueue(ctx, tx, []envelope.Message{{
-			Topic: eventsTopic, Key: seat, Payload: wire, Headers: incoming.Headers(),
+			Topic: eventsTopic, Key: seat, Payload: wire, Headers: outgoing.Headers(),
 		}})
 	}); err != nil {
 		t.Fatalf("inventory handler: %v", err)
@@ -212,12 +212,12 @@ func TestEventCrossesServicesExactlyOnce(t *testing.T) {
 			t.Fatalf("publish %s: %v", e.ID, err)
 		}
 	}
-	republish(incoming)
+	republish(outgoing)
 
 	// No sleeping: send a second, distinct event and wait for it. Once that has been
 	// applied, the duplicate ahead of it in the same partition has certainly been
 	// processed, because one partition is handled in order.
-	second := incoming
+	second := outgoing
 	second.ID = envelope.NewID()
 	republish(second)
 

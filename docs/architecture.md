@@ -102,12 +102,12 @@ sequenceDiagram
     participant DB2 as Postgres (booking)
 
     H->>DB: BEGIN
-    H->>DB: INSERT inbox (consumer, source, event_id)
+    H->>DB: INSERT inbox … ON CONFLICT DO NOTHING
     H->>DB: INSERT events (stream_id, version, …)
     H->>DB: INSERT outbox (topic, key, payload, headers)
     H->>DB: SELECT pg_notify('outbox', '')
     H->>DB: COMMIT
-    Note over DB: all four writes commit together,<br/>or none of them do
+    Note over DB: the three writes commit together,<br/>or none of them do
     DB-->>P: NOTIFY delivered on commit
     P->>DB: SELECT … WHERE published_at IS NULL<br/>FOR UPDATE SKIP LOCKED
     P->>K: produce (acks=all)
@@ -165,7 +165,7 @@ stateDiagram-v2
     HoldSeat --> ReserveRoom: SeatHeld
     ReserveRoom --> CapturePayment: RoomReserved
     CapturePayment --> ConfirmSeatHold: PaymentCaptured
-    ConfirmSeatHold --> BookingConfirmed: SeatConfirmed
+    ConfirmSeatHold --> BookingConfirmed: SeatConfirmed + RoomConfirmed
     BookingConfirmed --> [*]
 
     note left of CapturePayment

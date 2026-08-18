@@ -64,9 +64,10 @@
 //
 // This package does not put anything on the wire and does not know Kafka
 // exists. Framing bytes — the magic byte, the schema id, the message index
-// — belong to platform/schema, which wraps this package's binary protobuf
-// output in the Confluent format before a message is produced, and strips
-// that framing back off before a message reaches this package's Decode.
+// — belong to platform/schema, which produces the binary protobuf and its
+// Confluent framing itself, from the same proto.Message this package sees.
+// The two encodings are siblings, not layers: nothing here is ever wrapped
+// by anything there.
 // codec only ever sees a bare protobuf message on one side and a JSONB row
 // on the other.
 //

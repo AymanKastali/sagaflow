@@ -77,6 +77,7 @@
 //	             functions. No context, no database, no clock. Start here.
 //	store.go     LoadSeat and AppendSeat — the same fold and append, now
 //	             wrapped around a real transaction.
+//	errors.go     ErrUnknownEvent and ErrUnknownCommand.
 //	commands.go  Handler.Handle — the one-stream-per-transaction glue that
 //	             calls both. It only makes sense once seat.go's decisions and
 //	             store.go's transaction boundary are already understood.

@@ -16,7 +16,7 @@ ON CONFLICT (consumer, source, event_id) DO NOTHING`
 
 // MarkConsumed records that consumer has handled (source, eventID).
 //
-// It returns fresh=false when the message was already handled, in which case the
+// It returns false when the message was already handled, in which case the
 // caller rolls back and acknowledges without applying anything.
 //
 // Duplicates are detected by rows-affected rather than by catching a unique

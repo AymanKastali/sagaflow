@@ -49,8 +49,8 @@ var requiredHeadings = []string{
 // and why without reverse-engineering a glob, and so adding to it is a visible
 // decision rather than a quiet one.
 var exemptFromChapter = map[string]string{
-	"internal/inventory/migrations": "nine lines embedding a directory of SQL; six headings would be padding",
-	"internal/booking/migrations":   "nine lines embedding a directory of SQL; six headings would be padding",
+	"internal/inventory/migrations": "a dozen lines embedding a directory of SQL; six headings would be padding",
+	"internal/booking/migrations":   "a dozen lines embedding a directory of SQL; six headings would be padding",
 }
 
 // exemptEntirely lists packages with no non-test .go file at all.
@@ -145,6 +145,9 @@ func packageComment(t *testing.T, path string) string {
 
 // TestEveryPackageIsDocumented is D1: a package a reader can open is a package
 // that says what it is.
+//
+// The walk covers cmd/ as well as internal/ and contracts/. An executable is a
+// package a reader opens like any other, and cmd/schemactl carries a chapter.
 func TestEveryPackageIsDocumented(t *testing.T) {
 	for _, p := range findPackages(t) {
 		if len(p.goFiles) == 0 {
@@ -221,11 +224,27 @@ func TestChaptersHaveTheSixHeadings(t *testing.T) {
 		if _, err := os.Stat(docPath); err != nil {
 			continue // D2 already reported this
 		}
-		comment := packageComment(t, docPath)
+		// Match whole lines, not substrings. godoc only treats "# Foo" as a
+		// heading when it is a line of its own, so a chapter with all six crammed
+		// into one paragraph would satisfy a substring check while rendering no
+		// headings at all — and "# The problem with holds" would satisfy
+		// "# The problem". Both were confirmed to slip through before this.
+		lines := strings.Split(packageComment(t, docPath), "\n")
+		lineOf := map[string]int{}
+		for i, line := range lines {
+			if h := strings.TrimSpace(line); strings.HasPrefix(h, "# ") {
+				if _, seen := lineOf[h]; !seen {
+					lineOf[h] = i
+				}
+			}
+		}
 
 		previous := -1
 		for _, heading := range requiredHeadings {
-			at := strings.Index(comment, heading)
+			at, ok := lineOf[heading]
+			if !ok {
+				at = -1
+			}
 			if at < 0 {
 				t.Errorf("%s: rule D3 — chapter is missing the heading %q.\n"+
 					"All six headings from docs/conventions.md are required, in order. "+

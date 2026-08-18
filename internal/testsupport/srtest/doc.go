@@ -46,7 +46,8 @@
 // in its ephemeral storage mode — sql over in-memory H2, the only kind
 // Apicurio 3.x offers with nothing left over between runs — called once from
 // TestMain before any test runs. Shared returns that registry's URL to a
-// test, skipping the test in -short mode when no registry is running at all.
+// test, skipping the test whenever -short is set, and failing loudly if no
+// TestMain brought a registry up.
 //
 // URL already carries the path prefix Apicurio serves its Confluent-compatible
 // API under: a client pointed at the bare host gets 404 on every call, so
@@ -54,7 +55,8 @@
 // available to a caller at all.
 //
 // The isolation key is the subject name. Under the topic–record-name
-// strategy this registry is configured for, a subject is derived from a
+// strategy this project's clients use — a choice made in platform/schema,
+// not a registry setting — a subject is derived from a
 // topic name plus a fully qualified message type name, so a test that must
 // register or query a schema state no other test has touched picks a topic
 // name whose derived subject is exclusive to it, rather than sharing one

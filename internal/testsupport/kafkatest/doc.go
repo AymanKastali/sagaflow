@@ -42,10 +42,10 @@
 // # What this package does
 //
 // Start brings up one single-node KRaft broker for the whole test package
-// (apache/kafka:4.3.1, the same major version docker-compose.yaml runs),
+// (apache/kafka:4.3.1, the same major version docker-compose.yml runs),
 // called once from TestMain before any test runs. Shared returns that
-// broker's address list to a test, skipping the test in -short mode when no
-// broker is running at all.
+// broker's address list to a test, skipping the test whenever -short is set,
+// and failing loudly if no TestMain brought a broker up.
 //
 // Bringing the broker up has one wrinkle Start absorbs so no test has to
 // think about it: advertised.listeners must name the host-mapped port, which

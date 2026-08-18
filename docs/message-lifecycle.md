@@ -167,8 +167,8 @@ rollback, so the poller can never be woken for a row that was never written.
 
 ### 6. Commit
 
-Four writes — the inbox mark, the events, the outbox rows, the notification —
-commit together or not at all. That is the one invariant every handler in this
+Three writes — the inbox mark, the events, the outbox rows — commit together or
+not at all, and the notification is discarded with them on a rollback. That is the one invariant every handler in this
 system obeys, and it is the reason nothing has to reconcile anything afterwards.
 
 ---
@@ -187,12 +187,10 @@ LIMIT $1
 FOR UPDATE SKIP LOCKED
 ```
 
-**Rows are claimed by flag, never by a cursor over `id`.** `BIGSERIAL` values are
-handed out at insert but become visible at commit, so a row that commits late can
-carry a lower id than one already published. A cursor would step over it and lose
-it silently — and only ever under concurrency, which is the worst kind of bug to
-own. A flag has no such window: whatever is still `NULL` is claimed on the next
-pass.
+**Rows are claimed by flag, never by a cursor over `id`.** A cursor would lose
+rows silently, and only ever under concurrency. Why that is — and why `SKIP
+LOCKED` is here for failover rather than throughput — is in the chapter:
+`go doc ./internal/platform/outbox`.
 
 `SKIP LOCKED` is for failover, not throughput: a second poller taking over
 mid-batch makes progress instead of blocking behind the first one's rows.

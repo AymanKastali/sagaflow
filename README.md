@@ -116,9 +116,10 @@ terminal; there is nothing to install and nothing to run.
 7. **`go doc ./internal/platform/envelope`**, then `codec`, then `schema` — what
    is actually on the wire and in the database, and why one schema has two
    encodings.
-8. **`internal/platform/kafka`** — the broker plumbing: acks, marked offsets,
-   DLQ routing. This is the one package with no chapter yet, so read
-   `producer.go` and `consumer.go` directly.
+8. **`go doc ./internal/platform/kafka`** — the broker plumbing: which of
+   Kafka's throughput-oriented defaults quietly lose work, and the three
+   non-default options that are the difference between at-least-once and
+   silent loss.
 9. **`go doc ./internal/inventory`**, then `seat.go` — a real service. The
    decision functions are pure: no database, no context, and deliberately no
    clock.

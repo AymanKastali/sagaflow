@@ -19,7 +19,7 @@ import (
 const (
 	// CommandsTopic and EventsTopic are separate topics, one pair per service,
 	// so a consumer that only wants to react to inventory's own events never
-	// has to filter decision the commands other services send it.
+	// has to filter out the commands other services send it.
 	CommandsTopic = "inventory.commands"
 	EventsTopic   = "inventory.events"
 
@@ -130,7 +130,7 @@ func (h *Handler) applyInOneTransaction(ctx context.Context, incoming envelope.E
 
 // messages frames each outgoing message and wraps it in its own envelope.
 //
-// Each gets a firstDelivery ce_id because each is a distinct message, keeps the
+// Each gets a new ce_id because each is a distinct message, keeps the
 // incoming correlation id so the saga can route the reply, and takes the
 // incoming ce_id as its causation id, so each outgoing message still names
 // the one that caused it and the chain can be walked back message by message.

@@ -4,8 +4,9 @@
 // # The problem
 //
 // Every message type on the wire needs a schema in the registry before a
-// service can produce or consume it — inventory's Encode looks up a schema
-// id at construction and fails to start if the lookup comes back empty. That
+// service can produce or consume it — a serde resolves every schema id when
+// it is constructed, and refuses to construct at all if the registry has no
+// such subject, so a missing schema stops a service at startup. That
 // registration has to happen somewhere, run by someone, at some point in the
 // deployment sequence, and it has to have happened by the time the first
 // service that needs it starts.

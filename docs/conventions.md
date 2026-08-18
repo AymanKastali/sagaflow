@@ -36,6 +36,11 @@ explained twice; a second place that needs the concept links to the first.
 concrete trace → an executable `Example` or an annotated test, linked from the
 prose that describes it. Names status, structure or reading order → `README.md`.
 
+**The one exception.** Two chapters may both state a mechanism they both depend
+on. A chapter has to be true out of context (C1), and a reader running `go doc`
+in a terminal cannot follow a link. A page under `docs/` has no such excuse: it
+links to the chapter instead.
+
 ---
 
 ## The chapter standard
@@ -140,7 +145,7 @@ After — self-contained, what before why, no citation:
 
 | Instead of | Write | Because |
 |---|---|---|
-| `env envelope.Envelope` | `incoming envelope.Envelope` | `env` reads as "environment" |
+| `env envelope.Envelope` | `incoming` for one received, `outgoing` for one being built | `env` reads as "environment", and the two directions are not the same thing |
 | `out Outcome` | `decision Outcome` | `out` reads as an output parameter |
 | `fresh bool` | `firstDelivery bool` | "fresh" does not say fresh *what* |
 | `handleOnce` | `applyInOneTransaction` | the name hid the entire point |

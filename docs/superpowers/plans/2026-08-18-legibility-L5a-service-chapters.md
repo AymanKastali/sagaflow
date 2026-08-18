@@ -415,7 +415,7 @@ start would otherwise define the contract, and a bad schema would reach the
 registry in production rather than in CI.
 
 The two migrations packages get a real package comment and deliberately no
-chapter — nine lines embedding a directory of SQL cannot fill six headings
+chapter — a dozen lines embedding a directory of SQL cannot fill six headings
 without padding, which the spec amendment now says explicitly.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"

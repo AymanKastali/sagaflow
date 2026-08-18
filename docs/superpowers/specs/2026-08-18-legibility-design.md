@@ -126,6 +126,15 @@ explanation is what rots.
 **Nothing is explained in two places.** Where a second place needs the concept,
 it links.
 
+**One exception, found while writing the chapters.** This rule and C1 conflict
+for a fact that two packages both depend on: C1 requires a chapter to be true out
+of context, and a reader running `go doc` in a terminal cannot follow a link.
+Where a mechanism is load-bearing for two packages — Postgres assigning
+`BIGSERIAL` at insert but making it visible at commit is the real case — **both
+chapters state it**, each applied to its own decision. Self-containment wins
+inside godoc. It does not win in `docs/`, where links work: a `docs/` page needing
+that mechanism links to the chapter rather than restating it.
+
 ### 5.1 What `docs/` gains
 
 `docs/superpowers/` is named after the tool that generated it. A reader looking

@@ -84,10 +84,11 @@
 //
 // # Reading order
 //
-//	producer.go   NewProducer and Publish — why acks=all and idempotent
-//	              production need no configuration here, only naming.
-//	consumer.go   NewConsumer's three options, the retry-then-DLQ policy,
-//	              and Close. Start here; it is most of the package.
+//	consumer.go   NewConsumer's three options, the retry-then-DLQ policy, and
+//	              Close. Start here; it is most of the package and all of the
+//	              reasoning.
+//	producer.go   NewProducer and Publish — acks=all set explicitly, and why
+//	              idempotent production needs no setting at all.
 //	admin.go      EnsureTopics — explicit topic creation instead of relying
 //	              on the broker's auto-create defaults.
 //

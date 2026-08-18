@@ -1,6 +1,7 @@
 package envelope_test
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 
@@ -91,8 +92,12 @@ func ExampleParse_missingAttribute() {
 		"ce_type":        "sagaflow.inventory.v1.SeatHeld",
 	})
 
+	// errors.Is against the sentinel is what a consumer actually branches on to
+	// decide "dead-letter now" rather than "retry with backoff". Asserting only
+	// that err != nil would pass even if the error stopped being classifiable,
+	// which is the property that matters here.
 	fmt.Println(err)
-	fmt.Println("permanent:", err != nil)
+	fmt.Println("permanent:", errors.Is(err, envelope.ErrMissingAttribute))
 
 	// Output:
 	// envelope: missing required attribute: ce_id

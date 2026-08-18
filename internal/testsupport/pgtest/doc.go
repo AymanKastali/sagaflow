@@ -42,8 +42,8 @@
 //
 // Start brings up one Postgres container for the whole test package, called
 // once from TestMain before any test runs. Shared returns that container's
-// handle to a test, skipping the test in -short mode when no container is
-// running at all.
+// handle to a test, skipping the test whenever -short is set, and failing loudly if no
+// TestMain brought a container up.
 //
 // The isolation key is the database name. DSN creates dbName inside that one
 // running container — reusing it if a prior call in the same test already
