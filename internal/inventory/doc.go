@@ -53,15 +53,31 @@
 // forever, so even a no-op release still produces a reply.
 //
 // The decision functions have no clock. A hold is live until an event ends
-// it — a release, eventually an expiry — never until a clock says the TTL has
-// passed. That absence is what stops a new hold racing an expiry: if "held"
-// meant "held, unless now() has passed expires_at", two goroutines evaluating
-// now() a millisecond apart could disagree about whether the seat was free.
-// Expiry will itself be an event, SeatHoldExpired, appended by a timer this
-// package owns and has not built yet — a clock is still involved, just not
-// inside the decision.
+// it — a release, an expiry — never until a clock says the TTL has passed.
+// That absence is what stops a new hold racing an expiry: if "held" meant
+// "held, unless now() has passed expires_at", two goroutines evaluating now()
+// a millisecond apart could disagree about whether the seat was free. Expiry
+// is itself an event, SeatHoldExpired, appended by a timer this package owns.
+// A clock is still involved; it is just not inside the decision.
+//
+// A hold therefore ends in one of three ways, and all three are events on the
+// seat's own stream: the saga releases it, the saga confirms it, or its
+// deadline passes and inventory expires it. The third exists because the first
+// two need the booking service alive, and 14A has to come back even when it
+// is not. Expiry is also the one decision here that may answer with nothing
+// at all — a deadline that finds its hold already gone has nobody to answer,
+// because no command was sent.
 //
 // # What it deliberately does not do
+//
+// It does not treat a passed deadline as making a hold false. The hold is
+// still held until SeatHoldExpired is appended, which is why a new hold can
+// never race an expiry and why nothing here needs a now().
+//
+// It does not cancel a timer when a hold is released early. The release and
+// the deadline can arrive in either order, so a late fire has to be harmless
+// regardless — and once it is harmless, cancelling it is dead code that can
+// itself fail.
 //
 // This package does not know Kafka exists. Its dependency list ends at the
 // outbox row it writes in the same transaction as the seat's events —
@@ -81,13 +97,17 @@
 //	commands.go  Handler.Handle — the one-stream-per-transaction glue that
 //	             calls both. It only makes sense once seat.go's decisions and
 //	             store.go's transaction boundary are already understood.
+//	expiry.go    Expirer.Fire — the same shape as commands.go with one thing
+//	             missing. Read them side by side: the absent inbox row is the
+//	             whole lesson.
 //
 // # Where this comes from
 //
 // Design spec §6.3 (a seat is one stream, and why that is safe), §7.2 (one
-// transaction writes exactly one stream, plus its outbox rows, plus its inbox
-// row), §9.3 (a compensation such as ReleaseSeatHold must never dead-letter,
+// transaction writes exactly one stream, plus its outbox rows, its inbox row,
+// and any deadline it scheduled), §9.3 (a compensation such as ReleaseSeatHold must never dead-letter,
 // so it always gets a reply), §10.3 (three immediate reload-retries before a
 // conflict is given up on), §10.5 (why the seat's own timer, not the saga's
-// step timeout, has to own expiry).
+// step timeout, has to own expiry, and why the timer row's claim replaces the
+// inbox on that path).
 package inventory

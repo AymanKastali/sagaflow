@@ -167,9 +167,37 @@ rollback, so the poller can never be woken for a row that was never written.
 
 ### 6. Commit
 
-Three writes — the inbox mark, the events, the outbox rows — commit together or
-not at all, and the notification is discarded with them on a rollback. That is the one invariant every handler in this
-system obeys, and it is the reason nothing has to reconcile anything afterwards.
+Four writes — the inbox mark, the events, the outbox rows, and any deadline
+those events need — commit together or not at all, and the notification is
+discarded with them on a rollback. That is the one invariant every handler in
+this system obeys, and it is the reason nothing has to reconcile anything
+afterwards.
+
+---
+
+## The message nobody sent
+
+Everything above starts with a message arriving. One kind of message starts with
+nothing arriving at all.
+
+When a seat's hold reaches its deadline, `inventory` appends `SeatHoldExpired`
+and publishes it exactly like any other event — same outbox, same poller, same
+topic. What differs is its envelope, and the difference is readable:
+
+| Header | On a reply to `HoldSeat` | On `SeatHoldExpired` |
+|---|---|---|
+| `ce_correlationid` | copied from the incoming message | read off the seat's own stream |
+| `ce_causationid` | the incoming `ce_id` | **absent** |
+
+Both carry a correlation id, because both belong to the same saga and the saga
+routes on it. The expiry has to recover that id from the event that took the
+hold, since no message arrived carrying it — the stream recorded who was asking,
+so the stream can answer.
+
+The causation id is absent because nothing caused it. A deadline passed. That
+asymmetry is how a reader tells a reaction from an initiation: walk the chain
+backwards from any message and you arrive either at the request that started
+everything, or at a message with no parent, which is a clock.
 
 ---
 

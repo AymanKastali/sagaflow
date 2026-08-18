@@ -75,7 +75,7 @@ Consumer groups are named per *purpose*, not per service — `booking.saga`,
 same topic more than once for different reasons. That is why the consumer name
 is part of the inbox primary key.
 
-Every service's database holds the same three tables plus its own domain
+Every service's database holds the same four tables plus its own domain
 projections:
 
 | Table | Holds |
@@ -83,6 +83,7 @@ projections:
 | `events` | the append-only log. `UNIQUE (stream_id, version)` |
 | `outbox` | messages waiting to be published, written in the transaction that produced them |
 | `inbox` | which messages this service has already applied |
+| `timers` | deadlines to come back at, written in the transaction that made them necessary |
 
 ---
 
@@ -105,9 +106,10 @@ sequenceDiagram
     H->>DB: INSERT inbox … ON CONFLICT DO NOTHING
     H->>DB: INSERT events (stream_id, version, …)
     H->>DB: INSERT outbox (topic, key, payload, headers)
+    H->>DB: INSERT timers (fire_at, subject, token)
     H->>DB: SELECT pg_notify('outbox', '')
     H->>DB: COMMIT
-    Note over DB: the three writes commit together,<br/>or none of them do
+    Note over DB: the four writes commit together,<br/>or none of them do
     DB-->>P: NOTIFY delivered on commit
     P->>DB: SELECT … WHERE published_at IS NULL<br/>FOR UPDATE SKIP LOCKED
     P->>K: produce (acks=all)
@@ -144,6 +146,54 @@ Where the code lives: `internal/platform/outbox` (enqueue and poller),
 `internal/platform/inbox` (deduplication), `internal/platform/kafka` (produce
 and consume), `internal/platform/eventstore` (the log). Each has its own chapter
 — run `go doc ./internal/platform/outbox` and so on.
+
+---
+
+## The path with no message on it
+
+A service runs a second background loop beside its outbox poller, and it exists
+for the messages that never arrive.
+
+A seat held by a booking that then crashes has no release coming. Nothing failed
+and nothing is retrying — a message was simply never sent — so no amount of
+redelivery machinery helps. The seat has to free itself.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as scheduler (inventory)
+    participant DB as Postgres (inventory)
+
+    S->>DB: SELECT … WHERE fired_at IS NULL AND fire_at <= now()
+    S->>DB: BEGIN
+    S->>DB: UPDATE timers SET fired_at = now()<br/>WHERE id = $1 AND fired_at IS NULL
+    Note over S,DB: 0 rows affected ⇒ another scheduler has it ⇒<br/>roll back, do nothing
+    S->>DB: SELECT events WHERE stream_id = subject
+    Note over S: fold, then decide against the stream —<br/>the hold may already be gone
+    S->>DB: INSERT events (SeatHoldExpired)
+    S->>DB: INSERT outbox
+    S->>DB: COMMIT
+```
+
+Compare it with the delivery path above. Two differences carry the whole idea.
+
+**There is no inbox row.** Nothing was delivered, so there is nothing to
+deduplicate. The claim on the timer row does the job the inbox does elsewhere,
+and it is in the same transaction as the effect for exactly the same reason.
+
+**There is no leader election**, though the outbox poller has one. The outbox
+elects because its effect — the Kafka publish — happens outside the row's
+transaction, so two pollers on one row publish it twice. A timer's whole effect
+is inside the transaction that claims it, so two schedulers racing one row settle
+it between themselves.
+
+The fire is decided against the stream, never against the clock, which is why a
+deadline that arrives after the hold was already released does nothing at all
+rather than freeing a seat someone else now holds. That is also why nothing here
+ever cancels a timer.
+
+Where the code lives: `internal/platform/timers` (the table and the loop),
+`internal/inventory` (`expiry.go`, the decision about what a due timer means).
 
 ---
 
