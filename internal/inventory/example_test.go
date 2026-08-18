@@ -103,3 +103,32 @@ func ExampleDecide_releasingAHoldThatIsAlreadyGone() {
 	// replies: 1
 	// reply:   sagaflow.inventory.v1.SeatHoldReleased
 }
+
+// ExampleSeatState_Expire shows the one decision in this package that answers
+// with nothing.
+//
+// The hold this timer was set for is long gone — released, and the seat taken by
+// a different booking since. Expiring it here would free a seat someone is
+// actively holding, so the token fence stops it. Nothing comes back, and nothing
+// is the right answer: no command was sent, so nobody is waiting for a reply.
+func ExampleSeatState_Expire() {
+	current := inventory.SeatState{
+		Version:   3,
+		Status:    inventory.StatusHeld,
+		HoldID:    "hold-2",
+		BookingID: "booking-2",
+	}
+
+	stale := current.Expire("seat-BA117-2026-09-01-14A", "hold-1")
+	live := current.Expire("seat-BA117-2026-09-01-14A", "hold-2")
+
+	fmt.Println("stale timer -> events:", len(stale.Events), "replies:", len(stale.Replies))
+	fmt.Println("live timer  -> events:", len(live.Events), "replies:", len(live.Replies))
+	fmt.Printf("live timer  -> event:   %s\n",
+		live.Events[0].ProtoReflect().Descriptor().FullName())
+
+	// Output:
+	// stale timer -> events: 0 replies: 0
+	// live timer  -> events: 1 replies: 0
+	// live timer  -> event:   sagaflow.inventory.v1.SeatHoldExpired
+}
