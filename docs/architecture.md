@@ -234,6 +234,39 @@ state. That is why this consumer keeps no inbox row: there is no duplicate for
 one to absorb. The same function run for every stream is a full rebuild, which
 is how the view can be dropped whenever its shape needs to change.
 
+## What a service is made of
+
+A service here is not a request handler. Nothing calls it; it consumes, and it
+runs four loops around one database — the shape every service in this system
+takes, and today only `inventory` has all four.
+
+```mermaid
+flowchart LR
+    CT[/inventory.commands/] --> CC[commands consumer]
+    CC -->|one transaction| DB[("Postgres:<br/>streams, outbox,<br/>inbox, timers, view")]
+    DB --> OP[outbox poller] --> ET[/inventory.events/]
+    DB --> TS[timer scheduler] --> DB
+    ET --> PC[projection consumer] --> DB
+```
+
+Two of those loops exist because a message must not depend on anyone being
+around to send it. The **outbox poller** publishes rows that some earlier
+transaction committed, so a service that died between committing and publishing
+publishes on its next start rather than losing the message. The **timer
+scheduler** fires deadlines nobody is waiting on, which is the only reason a
+seat held by a crashed booking ever comes back.
+
+The other two are the two directions of the same topic pair: the **commands
+consumer** applies what other services ask for, and the **projection consumer**
+reads this service's own events back to keep the stale view moving.
+
+`inventory.New` builds all of it and fails there if it can — an unreachable
+database, an unregistered schema, a broker that is not up. `Run` starts the four
+and returns when the context is cancelled or one of them fails. Cancelling is
+the entire shutdown story, which is what makes "the service died in the middle
+of a saga" a `cancel()` call in a test: the next process finds exactly what a
+crash leaves behind, which is whatever committed and nothing else.
+
 ## The saga
 
 *Not built. This section describes the design from the spec; phase 7 implements
