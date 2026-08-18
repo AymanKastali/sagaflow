@@ -40,7 +40,7 @@ prose that describes it. Names status, structure or reading order → `README.md
 
 ## The chapter standard
 
-Every package under `internal/` and `contracts/` has a `doc.go` containing the
+Every package under `internal/` and `contracts/` gets a `doc.go` containing the
 package comment and nothing else — no code, no imports. It uses these six
 headings, in this order, in Go's godoc heading syntax so that `go doc` renders
 them:
@@ -179,6 +179,9 @@ standard:
 `internal/docs/docs_test.go` checks the mechanical parts, so the standard
 survives without anyone remembering to care. It walks the tree: a package added
 later that skips its chapter fails the suite the day it is written.
+
+*Not yet written — it arrives with the last documentation pass. Until then
+D1–D5 are checked by hand.*
 
 - **D1.** Every package under `internal/` and `contracts/` has a non-empty
   package comment.

@@ -53,6 +53,10 @@ flowchart LR
     P -- payment.events --> B
 ```
 
+*This is the target architecture, not what is built today: only `inventory`
+is a working service, `booking` has its database migrations and nothing
+else, and `hotel` and `payment` do not exist yet. See [Status](#status).*
+
 Four services, **four separate Postgres databases** — the separation is the
 point, since one shared database would make the whole problem disappear along
 with the lesson. Every database holds that service's events, its outbox and its
@@ -112,8 +116,9 @@ terminal; there is nothing to install and nothing to run.
 7. **`go doc ./internal/platform/envelope`**, then `codec`, then `schema` — what
    is actually on the wire and in the database, and why one schema has two
    encodings.
-8. **`go doc ./internal/platform/kafka`** — the broker plumbing: acks, marked
-   offsets, DLQ routing.
+8. **`internal/platform/kafka`** — the broker plumbing: acks, marked offsets,
+   DLQ routing. This is the one package with no chapter yet, so read
+   `producer.go` and `consumer.go` directly.
 9. **`go doc ./internal/inventory`**, then `seat.go` — a real service. The
    decision functions are pure: no database, no context, and deliberately no
    clock.
@@ -139,8 +144,10 @@ terminal; there is nothing to install and nothing to run.
 | Message contracts | [contracts/](contracts) | its own Go module |
 
 The package chapters are being written now — see the
-[legibility spec](docs/superpowers/specs/2026-08-18-legibility-design.md). Until
-a package has one, `go doc` shows only its summary.
+[legibility spec](docs/superpowers/specs/2026-08-18-legibility-design.md).
+Until a package has one, `go doc` shows only its existing summary — and for
+`internal/platform/kafka`, which has no package comment yet, only a list of
+symbols.
 
 ---
 
@@ -163,6 +170,7 @@ internal/
   booking/                 a service: migrations only so far
   testsupport/             container fixtures for tests
   integration/             tests that need more than one service
+  toolchain/               a test that fails if the Go version floor slips
 docs/
   conventions.md           how code and docs are written here
   glossary.md              every domain term, defined once
@@ -180,7 +188,7 @@ Requires Docker and Go 1.26.6.
 make up               # Kafka, four Postgres, Apicurio registry, Jaeger
 make test             # unit tests only — never starts a container
 make test-integration # everything, with real Kafka and Postgres
-make lint             # go vet, both modules, plus buf lint
+make lint             # gofmt, go vet, both modules, plus buf lint
 make generate         # regenerate contracts from proto/
 make breaking         # check proto changes against main
 make schemas-register # register schemas; services never auto-register

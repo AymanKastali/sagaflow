@@ -13,9 +13,12 @@ generate:
 # exist (Phase 3a) -- buf fails outright on a module with no .proto files, and a
 # lint target that cannot be run is a lint target nobody runs.
 lint:
-	@# gofmt reports, it does not fail, so turn any output into an error.
-	@out=$$(gofmt -l . ; cd contracts && gofmt -l . | sed 's|^|contracts/|'); \
-	if [ -n "$$out" ]; then echo "gofmt: not formatted:"; echo "$$out"; exit 1; fi
+	@# gofmt -l . already recurses into contracts/ from the root, and reports
+	@# formatting issues without failing, so turn its output into an error; a
+	@# file that fails to parse makes gofmt exit non-zero with empty stdout, so
+	@# that exit code has to fail the check too, not just a non-empty listing.
+	@out=$$(gofmt -l . 2>&1); status=$$?; \
+	if [ $$status -ne 0 ] || [ -n "$$out" ]; then echo "gofmt: not formatted:"; echo "$$out"; exit 1; fi
 	go vet ./...
 	cd contracts && go vet ./...
 	@if [ -f buf.yaml ]; then go tool buf lint; \
