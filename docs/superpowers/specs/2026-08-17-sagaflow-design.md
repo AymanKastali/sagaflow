@@ -312,7 +312,8 @@ sagaflow/
     │   ├── schema/                 # registry framing, compatibility level
     │   ├── envelope/               # CloudEvents headers, the shared Message type
     │   ├── codec/                  # protojson for the event store
-    │   ├── saga/                   # state-machine runtime, timer scheduler
+    │   ├── saga/                   # state-machine runtime
+    │   ├── timers/                 # due-time scheduler: schedule in a transaction, claim, fire
     │   ├── pg/                     # pool, migrations, WithTx
     │   └── obs/                    # OTel setup, slog
     ├── testsupport/                # containers for tests — never reached from production
@@ -334,6 +335,14 @@ message ⇄ Kafka body in Confluent framing. Merging them would couple replay to
 `testsupport/`, `integration/`, and `toolchain/` were not named here originally. They exist,
 so the tree says so. See
 [2026-08-18-platform-package-restructure-design.md](2026-08-18-platform-package-restructure-design.md).
+
+`timers/` was originally a clause inside `saga/`, and that was wrong. §10.5 describes two timers,
+and only one of them belongs to a saga: the seat-hold TTL is owned by `inventory`, which runs no
+saga runtime at all and must keep expiring holds precisely when `booking` is the thing that died.
+A scheduler reachable only through the saga package would make the service that needs it most
+import the one component it deliberately does not have. Scheduling due work is a mechanic like the
+outbox, not a part of the state machine, so it sits beside `outbox/` where the same claim-based
+pattern already lives.
 
 `internal/platform/` will feel like writing a framework. That is deliberate: it is where the four
 topics live, and all four services need it.
