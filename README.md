@@ -53,8 +53,8 @@ flowchart LR
     P -- payment.events --> B
 ```
 
-*This is the target architecture, not what is built today: only `inventory`
-is a working service, `booking` has its database migrations and nothing
+*This is the target architecture, not what is built today: `inventory` is the
+only service you can start, `booking` has its database migrations and nothing
 else, and `hotel` and `payment` do not exist yet. See [Status](#status).*
 
 Four services, **four separate Postgres databases** — the separation is the
@@ -82,7 +82,7 @@ from design spec §13.
 | 5a | Inventory — seat streams and holds | `internal/inventory` | **built** |
 | 5b | Seat-hold TTL — a hold that expires with nobody alive to expire it | `internal/platform/timers`, `internal/inventory` | **built** |
 | 5c | Availability projection — a derived seat map that may lag and still cannot oversell | `internal/inventory/projection.go` | **built** |
-| 5d | `wire.go` and `cmd/inventory` — inventory as something you can start | — | not built |
+| 5d | `wire.go` and `cmd/inventory` — inventory as something you can start, and kill | `internal/inventory/wire.go`, `cmd/inventory` | **built** |
 | 6 | Hotel and payment, with the provider stub and idempotency keys | — | not built |
 | 7 | The saga — `Decide`, step timeouts, the compensation matrix | — | not built |
 | 8 | Booking API and its projection | — | not built |
@@ -91,8 +91,10 @@ from design spec §13.
 
 The reliability machinery is finished and proven: an event crosses from one
 service's transaction to another service's handler, exactly once applied, and
-survives a consumer rebalance. What is not yet built is most of the business
-flow — there is no saga and no HTTP entry point yet.
+survives a consumer rebalance. `inventory` is a process you can start, kill
+mid-flow with a cancelled context, and start again against what it committed.
+What is not yet built is most of the business flow — there is no saga and no
+HTTP entry point yet.
 
 ---
 
@@ -130,6 +132,9 @@ terminal; there is nothing to install and nothing to run.
 11. **`internal/inventory/projection.go`** — the read side: the same events
     folded a second time into a table you can query, why it is allowed to be
     stale, and why being stale cannot cost anyone a seat.
+12. **`internal/inventory/consumers.go`**, then **`wire.go`** — what turns all
+    of the above into a process: which failures are permanent, and the four
+    loops a service is made of. Then `go doc ./cmd/inventory`.
 
 ---
 
@@ -167,8 +172,8 @@ contracts/                 the message schemas. its own Go module, so a
 proto/                     the .proto sources those are generated from.
                            one message per file — a Confluent framing
                            constraint, not a style choice
-cmd/                       executables. today: schemactl, which registers
-                           schemas
+cmd/                       executables: schemactl, which registers schemas,
+                           and inventory, the one service you can run
 internal/
   platform/                the reusable machinery. one concept per package,
                            and no package here knows about any service
@@ -196,6 +201,7 @@ make up               # Kafka, four Postgres, Apicurio registry, Jaeger
 make test             # unit tests only — never starts a container
 make test-integration # everything, with real Kafka and Postgres
 make lint             # gofmt, go vet, both modules, plus buf lint
+make run-inventory    # run the inventory service (after up + schemas-register)
 make generate         # regenerate contracts from proto/
 make breaking         # check proto changes against main
 make schemas-register # register schemas; services never auto-register

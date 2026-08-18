@@ -28,13 +28,18 @@ import (
 	"github.com/AymanKastali/sagaflow/internal/platform/pg"
 	"github.com/AymanKastali/sagaflow/internal/testsupport/kafkatest"
 	"github.com/AymanKastali/sagaflow/internal/testsupport/pgtest"
+	"github.com/AymanKastali/sagaflow/internal/testsupport/srtest"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// One Postgres and one Kafka for the whole package. Both tests below
-// stand up their own databases and topics inside them.
+// One Postgres, one Kafka and one schema registry for the whole package. Each
+// test stands up its own databases and topics inside them.
+//
+// The registry is here for one test: the one that starts inventory as a real
+// service. A service resolves every schema id it will ever need at startup, so
+// it cannot be started against a registry that is not there.
 func TestMain(m *testing.M) {
 	stopPG, err := pgtest.Start()
 	if err != nil {
@@ -47,7 +52,15 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	stopRegistry, err := srtest.Start()
+	if err != nil {
+		stopKafka()
+		stopPG()
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	code := m.Run()
+	stopRegistry()
 	stopKafka()
 	stopPG()
 	os.Exit(code)

@@ -1,4 +1,4 @@
-.PHONY: up down generate lint breaking schemas-register test test-integration
+.PHONY: up down generate lint breaking schemas-register run-inventory test test-integration
 
 up:
 	docker compose up -d --wait
@@ -30,6 +30,11 @@ breaking:
 
 schemas-register:
 	go run ./cmd/schemactl -registry http://localhost:8080/apis/ccompat/v7
+
+# Needs `make up` and `make schemas-register` first: the service resolves every
+# schema id it will use at startup and refuses to run without them.
+run-inventory:
+	go run ./cmd/inventory
 
 # The contracts module has no container tests, so it needs no -short variant and
 # no timeout bump -- but it is a separate module, so the root ./... never reaches it.
