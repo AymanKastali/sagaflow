@@ -197,6 +197,43 @@ Where the code lives: `internal/platform/timers` (the table and the loop),
 
 ---
 
+## The answer that is allowed to be wrong
+
+Everything above is about being exactly right: one hold per seat, one apply per
+message, no state change without the message that announces it. The read side is
+the opposite. A customer opening a seat map wants three hundred seats at once,
+and folding three hundred streams to draw one picture would make browsing the
+most expensive thing the system does.
+
+So there is a derived table, `seat_availability`, holding one row per seat that
+has a stream. It is written by consuming `inventory.events`, and it lags by
+however long that takes.
+
+```mermaid
+sequenceDiagram
+    participant C as customer
+    participant V as seat_availability
+    participant S as seat stream
+    C->>V: which seats are taken?
+    V-->>C: 14A is free
+    Note over S: 14A was held 40 ms ago;<br/>the view has not heard yet
+    C->>S: hold 14A
+    S-->>C: SeatUnavailable
+```
+
+The stale answer costs one click. It cannot cost a seat, because no decision is
+ever taken from the view: a hold is decided from the seat's own stream, inside
+the transaction that appends to it, where `UNIQUE(stream_id, version)` is
+waiting. Cheap stale reads with strict writes is the standard split, and this is
+what makes it safe here.
+
+The projector does not apply the event it was handed. It re-reads the seat whose
+stream changed and writes the fold — so the same notification twice produces the
+same row, and two notifications in the wrong order both end at the current
+state. That is why this consumer keeps no inbox row: there is no duplicate for
+one to absorb. The same function run for every stream is a full rebuild, which
+is how the view can be dropped whenever its shape needs to change.
+
 ## The saga
 
 *Not built. This section describes the design from the spec; phase 7 implements

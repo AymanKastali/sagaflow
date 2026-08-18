@@ -228,8 +228,9 @@ A queryable view built by consuming events, kept separate from the events
 themselves. Because it derives entirely from the stream it can be dropped and
 rebuilt, which is what makes it safe to change its shape.
 
-`bookings_view` and the seat availability view are projections.
-**(not built yet — phases 5b and 8)**
+`seat_availability` is a projection: a seat map derived from the seat streams,
+rebuilt by folding them again. `bookings_view` will be another.
+**(`bookings_view` not built yet — phase 8)**
 
 ## Reply
 
